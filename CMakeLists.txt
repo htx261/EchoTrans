@@ -16,7 +16,13 @@ set(CMAKE_AUTOUIC ON)
 
 include(cmake/EchoTransDependencies.cmake)
 
-find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test)
+
+set(ECHOTRANS_FFMPEG_LIBRARIES
+  "${ECHOTRANS_FFMPEG_LIB_DIR}/avformat.lib"
+  "${ECHOTRANS_FFMPEG_LIB_DIR}/avcodec.lib"
+  "${ECHOTRANS_FFMPEG_LIB_DIR}/avutil.lib"
+)
 
 add_library(EchoTransCore
   src/core/DependencyReport.cpp
@@ -40,6 +46,31 @@ target_link_libraries(EchoTransCore
     Qt5::Core
 )
 
+add_library(EchoTransMedia
+  src/media/FFmpegMediaProbe.cpp
+)
+
+target_include_directories(EchoTransMedia
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${ECHOTRANS_FFMPEG_INCLUDE_DIR}
+)
+
+target_link_libraries(EchoTransMedia
+  PUBLIC
+    Qt5::Core
+  PRIVATE
+    ${ECHOTRANS_FFMPEG_LIBRARIES}
+)
+
+function(echotrans_copy_ffmpeg_runtime target_name)
+  add_custom_command(TARGET ${target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${ECHOTRANS_FFMPEG_BIN_DIR}"
+        "$<TARGET_FILE_DIR:${target_name}>"
+  )
+endfunction()
+
 add_executable(EchoTrans
   src/app/main.cpp
   src/ui/MainWindow.cpp
@@ -48,8 +79,12 @@ add_executable(EchoTrans
 target_link_libraries(EchoTrans
   PRIVATE
     EchoTransCore
+    EchoTransMedia
+    Qt5::Concurrent
     Qt5::Widgets
 )
+
+echotrans_copy_ffmpeg_runtime(EchoTrans)
 
 add_executable(DependencyReportTests
   tests/core/DependencyReportTests.cpp
@@ -61,5 +96,23 @@ target_link_libraries(DependencyReportTests
     Qt5::Test
 )
 
+add_executable(FFmpegMediaProbeTests
+  tests/media/FFmpegMediaProbeTests.cpp
+)
+
+target_include_directories(FFmpegMediaProbeTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(FFmpegMediaProbeTests
+  PRIVATE
+    EchoTransMedia
+    Qt5::Test
+)
+
+echotrans_copy_ffmpeg_runtime(FFmpegMediaProbeTests)
+
 enable_testing()
 add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
+add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
