@@ -1,0 +1,42 @@
+# Build outputs
+build/
+build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Visual Studio / Qt generated files
+.vs/
+*.user
+*.suo
+*.sln.docstates
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Local Python environment used only for model conversion
+.venv-model/
+
+# Large local models and tokenizer assets
+models/
+EchoTrans-Resources/
+EchoTrans-Resources*.zip
+EchoTrans-ThirdParty*.zip
+EchoTrans-Models*.zip
+
+# Local third-party dependency packages and source trees
+third_party/ctranslate2/
+third_party/ctranslate2-src/
+third_party/ffmpeg/
+third_party/whisper.cpp/
+
+# Runtime binaries copied from third-party packages
+third_party/ffmpeg/bin/
+
+# Common temporary files
+*.log
+*.tmp
+*.bak
+*.orig
