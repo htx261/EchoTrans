@@ -3,6 +3,7 @@
 #include "core/DependencyReport.h"
 
 #include <QLabel>
+#include <QFont>
 #include <QStatusBar>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -18,23 +19,25 @@ MainWindow::MainWindow(QWidget* parent)
 
   auto* title = new QLabel(QStringLiteral("AI 同声传译助手"), central);
   title->setAlignment(Qt::AlignCenter);
+  QFont titleFont = title->font();
+  titleFont.setPointSize(22);
+  titleFont.setBold(true);
+  title->setFont(titleFont);
 
   const DependencyReport report = DependencyReport::fromConfiguredPaths();
-  const bool ready = report.ffmpegAvailable
-      && report.whisperAvailable
-      && report.ctranslate2Available
-      && report.whisperModelAvailable
-      && report.translationModelAvailable
-      && report.tokenizerAvailable;
 
   statusLabel_->setAlignment(Qt::AlignCenter);
-  statusLabel_->setText(ready
-      ? QStringLiteral("本地依赖与模型已就绪")
-      : QStringLiteral("本地依赖或模型未配置完整"));
+  statusLabel_->setWordWrap(true);
+  QFont statusFont = statusLabel_->font();
+  statusFont.setPointSize(16);
+  statusLabel_->setFont(statusFont);
+  statusLabel_->setText(report.startupMessage());
 
   layout->addWidget(title);
   layout->addWidget(statusLabel_);
   setCentralWidget(central);
 
-  statusBar()->showMessage(QStringLiteral("Ready"));
+  statusBar()->showMessage(report.isReady()
+      ? QStringLiteral("启动检查通过")
+      : QStringLiteral("启动检查失败"));
 }

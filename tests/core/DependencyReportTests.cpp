@@ -8,6 +8,8 @@ class DependencyReportTests : public QObject {
 private slots:
   void detectsConfiguredDependencies();
   void reportsMissingPath();
+  void summarizesReadyState();
+  void listsMissingResources();
 };
 
 void DependencyReportTests::detectsConfiguredDependencies() {
@@ -26,6 +28,40 @@ void DependencyReportTests::reportsMissingPath() {
 
   QVERIFY(!status.available);
   QCOMPARE(status.path, QStringLiteral("Z:/definitely/missing/path"));
+}
+
+void DependencyReportTests::summarizesReadyState() {
+  DependencyReport report;
+  report.ffmpegAvailable = true;
+  report.whisperAvailable = true;
+  report.ctranslate2Available = true;
+  report.whisperModelAvailable = true;
+  report.translationModelAvailable = true;
+  report.tokenizerAvailable = true;
+
+  QVERIFY(report.isReady());
+  QVERIFY(report.missingItems().isEmpty());
+  QCOMPARE(report.startupMessage(), QStringLiteral("启动检查通过：本地依赖与模型已就绪"));
+}
+
+void DependencyReportTests::listsMissingResources() {
+  DependencyReport report;
+  report.ffmpegAvailable = true;
+  report.whisperAvailable = false;
+  report.ctranslate2Available = true;
+  report.whisperModelAvailable = false;
+  report.translationModelAvailable = true;
+  report.tokenizerAvailable = false;
+
+  const QStringList missing = report.missingItems();
+
+  QVERIFY(!report.isReady());
+  QCOMPARE(missing.size(), 3);
+  QVERIFY(missing.contains(QStringLiteral("whisper.cpp")));
+  QVERIFY(missing.contains(QStringLiteral("Whisper 模型")));
+  QVERIFY(missing.contains(QStringLiteral("NLLB Tokenizer")));
+  QCOMPARE(report.startupMessage(),
+      QStringLiteral("启动检查失败：缺少 whisper.cpp、Whisper 模型、NLLB Tokenizer"));
 }
 
 QTEST_MAIN(DependencyReportTests)
