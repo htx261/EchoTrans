@@ -31,7 +31,7 @@ EchoTrans 是一款基于 C++ 和 Qt 的 AI 同声传译助手，面向外语演
 
 第三方库和模型文件体积较大，不提交到 Git 仓库。请从项目的 GitHub Releases 页面下载资源包。
 
-推荐资源包名称：
+资源包名称：
 
 ```text
 EchoTrans-Resources.zip
@@ -52,13 +52,6 @@ EchoTrans/
     tokenizers/
 ```
 
-如果资源包超过 GitHub Releases 单个文件大小限制，可以拆分为：
-
-```text
-EchoTrans-ThirdParty.zip
-EchoTrans-Models.zip
-```
-
 解压后仍需保证 `third_party/` 和 `models/` 位于项目根目录。
 
 ## 从源码构建
@@ -66,7 +59,7 @@ EchoTrans-Models.zip
 ### 1. 拉取代码
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/htx261/EchoTrans.git
 cd EchoTrans
 ```
 
@@ -110,17 +103,6 @@ $env:PATH="<Qt-Bin-Path>;" + $env:PATH
 ```powershell
 .\build\Debug\EchoTrans.exe
 ```
-
-## 当前进度
-
-当前版本完成了项目基础骨架：
-
-- CMake + Qt Widgets 工程结构
-- 最小主窗口
-- 本地依赖路径检测
-- Qt Test 依赖检测测试
-
-播放器、音频抽取、语音识别、翻译、字幕修正和字幕导出功能会在后续 PR 中分步实现。
 
 ## 第三方许可
 
