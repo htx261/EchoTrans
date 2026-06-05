@@ -63,6 +63,20 @@ target_link_libraries(EchoTransMedia
     ${ECHOTRANS_FFMPEG_LIBRARIES}
 )
 
+add_library(EchoTransPlayer
+  src/player/MediaPlayerCore.cpp
+)
+
+target_include_directories(EchoTransPlayer
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(EchoTransPlayer
+  PUBLIC
+    Qt5::Core
+)
+
 function(echotrans_copy_ffmpeg_runtime target_name)
   add_custom_command(TARGET ${target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -113,6 +127,37 @@ target_link_libraries(FFmpegMediaProbeTests
 
 echotrans_copy_ffmpeg_runtime(FFmpegMediaProbeTests)
 
+add_executable(BlockingQueueTests
+  tests/player/BlockingQueueTests.cpp
+)
+
+target_include_directories(BlockingQueueTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(BlockingQueueTests
+  PRIVATE
+    Qt5::Test
+)
+
+add_executable(MediaPlayerCoreTests
+  tests/player/MediaPlayerCoreTests.cpp
+)
+
+target_include_directories(MediaPlayerCoreTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(MediaPlayerCoreTests
+  PRIVATE
+    EchoTransPlayer
+    Qt5::Test
+)
+
 enable_testing()
 add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
 add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
+add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
+add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
