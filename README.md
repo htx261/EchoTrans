@@ -86,22 +86,16 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=<Qt-MSVC-Prefix-Path>
 cmake --build build --config Debug
 ```
 
-### 5. 运行测试
+### 5. 运行程序
 
 ```powershell
-.\build\Debug\DependencyReportTests.exe
+start .\build\Debug\EchoTrans.exe
 ```
 
 如果运行测试或程序时提示找不到 Qt DLL，请将本机 Qt `bin` 目录加入当前 PowerShell 会话的 `PATH`：
 
 ```powershell
 $env:PATH="<Qt-Bin-Path>;" + $env:PATH
-```
-
-### 6. 运行程序
-
-```powershell
-.\build\Debug\EchoTrans.exe
 ```
 
 ## 第三方许可
