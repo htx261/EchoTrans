@@ -20,6 +20,48 @@ DependencyStatus DependencyReport::checkPath(const QString& path) {
   return status;
 }
 
+bool DependencyReport::isReady() const {
+  return ffmpegAvailable
+      && whisperAvailable
+      && ctranslate2Available
+      && whisperModelAvailable
+      && translationModelAvailable
+      && tokenizerAvailable;
+}
+
+QStringList DependencyReport::missingItems() const {
+  QStringList items;
+
+  if (!ffmpegAvailable) {
+    items.append(QStringLiteral("FFmpeg"));
+  }
+  if (!whisperAvailable) {
+    items.append(QStringLiteral("whisper.cpp"));
+  }
+  if (!ctranslate2Available) {
+    items.append(QStringLiteral("CTranslate2"));
+  }
+  if (!whisperModelAvailable) {
+    items.append(QStringLiteral("Whisper 模型"));
+  }
+  if (!translationModelAvailable) {
+    items.append(QStringLiteral("NLLB 翻译模型"));
+  }
+  if (!tokenizerAvailable) {
+    items.append(QStringLiteral("NLLB Tokenizer"));
+  }
+
+  return items;
+}
+
+QString DependencyReport::startupMessage() const {
+  if (isReady()) {
+    return QStringLiteral("启动检查通过：本地依赖与模型已就绪");
+  }
+
+  return QStringLiteral("启动检查失败：缺少 %1").arg(missingItems().join(QStringLiteral("、")));
+}
+
 DependencyReport DependencyReport::fromConfiguredPaths() {
   DependencyReport report;
 

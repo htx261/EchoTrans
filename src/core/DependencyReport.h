@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 struct DependencyStatus {
   QString path;
@@ -21,6 +22,10 @@ struct DependencyReport {
   bool whisperModelAvailable = false;
   bool translationModelAvailable = false;
   bool tokenizerAvailable = false;
+
+  bool isReady() const;
+  QStringList missingItems() const;
+  QString startupMessage() const;
 
   static DependencyStatus checkPath(const QString& path);
   static DependencyReport fromConfiguredPaths();
