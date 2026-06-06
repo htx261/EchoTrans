@@ -37,6 +37,7 @@ set(ECHOTRANS_FFMPEG_LIBRARIES
 add_library(EchoTransCore
   src/core/DependencyReport.cpp
   src/subtitle/SubtitleTrack.cpp
+  src/transcription/TranscriptionAudioPreprocessor.cpp
   src/transcription/WhisperTranscriber.cpp
 )
 
@@ -191,6 +192,21 @@ target_link_libraries(WhisperTranscriberTests
     Qt5::Test
 )
 
+add_executable(TranscriptionAudioPreprocessorTests
+  tests/transcription/TranscriptionAudioPreprocessorTests.cpp
+)
+
+target_include_directories(TranscriptionAudioPreprocessorTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(TranscriptionAudioPreprocessorTests
+  PRIVATE
+    EchoTransCore
+    Qt5::Test
+)
+
 add_executable(MediaPlayerCoreTests
   tests/player/MediaPlayerCoreTests.cpp
 )
@@ -251,6 +267,7 @@ add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
 add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
 add_test(NAME SubtitleTrackTests COMMAND SubtitleTrackTests)
 add_test(NAME WhisperTranscriberTests COMMAND WhisperTranscriberTests)
+add_test(NAME TranscriptionAudioPreprocessorTests COMMAND TranscriptionAudioPreprocessorTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
 add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)
