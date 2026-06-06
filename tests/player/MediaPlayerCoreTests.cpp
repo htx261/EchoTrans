@@ -74,6 +74,8 @@ private slots:
   void destructorStopsWorkerThreads();
   void demuxThreadQueuesAudioPackets();
   void demuxThreadReportsOpenFailure();
+  void audioDecodeThreadProducesPcmFrames();
+  void audioOutputThreadConsumesFramesOrReportsDeviceError();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -180,7 +182,7 @@ void MediaPlayerCoreTests::demuxThreadQueuesAudioPackets() {
 
   QTRY_VERIFY_WITH_TIMEOUT(player.demuxFinished(), 1000);
   QVERIFY2(player.lastDemuxError().isEmpty(), qPrintable(player.lastDemuxError()));
-  QVERIFY(player.audioPacketQueueSize() > 0);
+  QVERIFY(player.demuxedAudioPacketCount() > 0);
   QCOMPARE(player.videoPacketQueueSize(), static_cast<std::size_t>(0));
 }
 
@@ -194,6 +196,40 @@ void MediaPlayerCoreTests::demuxThreadReportsOpenFailure() {
   QVERIFY(!player.lastDemuxError().isEmpty());
   QCOMPARE(player.audioPacketQueueSize(), static_cast<std::size_t>(0));
   QCOMPARE(player.videoPacketQueueSize(), static_cast<std::size_t>(0));
+}
+
+void MediaPlayerCoreTests::audioDecodeThreadProducesPcmFrames() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("silent.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(player.decodedAudioFrameCount() > 0, 1500);
+  QVERIFY2(player.lastAudioDecodeError().isEmpty(), qPrintable(player.lastAudioDecodeError()));
+  QVERIFY(player.decodedAudioByteCount() > 0);
+}
+
+void MediaPlayerCoreTests::audioOutputThreadConsumesFramesOrReportsDeviceError() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("silent.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(
+      player.audioOutputByteCount() > 0 || !player.lastAudioOutputError().isEmpty(),
+      2000);
+
+  QVERIFY(player.audioOutputByteCount() > 0 || !player.lastAudioOutputError().isEmpty());
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)
