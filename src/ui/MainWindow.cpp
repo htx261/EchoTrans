@@ -240,6 +240,7 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
 void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
   player_.stop();
+  pendingSeekPositionMs_ = -1;
   pauseButton_->setEnabled(false);
   pauseButton_->setText(QStringLiteral("暂停"));
   stopButton_->setEnabled(false);
@@ -269,7 +270,14 @@ void MainWindow::updatePlaybackStatus() {
     return;
   }
 
-  const qint64 positionMs = player_.audioClockMs();
+  const bool isSeeking = player_.seekInProgress();
+  if (!isSeeking) {
+    pendingSeekPositionMs_ = -1;
+  }
+
+  const qint64 positionMs = isSeeking && pendingSeekPositionMs_ >= 0
+      ? pendingSeekPositionMs_
+      : player_.audioClockMs();
   if (!seekSlider_->isSliderDown() && durationMs_ > 0) {
     seekSlider_->setValue(static_cast<int>(std::min(positionMs, durationMs_)));
   }
@@ -279,7 +287,7 @@ void MainWindow::updatePlaybackStatus() {
       ? QStringLiteral("继续")
       : QStringLiteral("暂停"));
 
-  if (player_.seekInProgress()) {
+  if (isSeeking) {
     statusBar()->showMessage(QStringLiteral("正在跳转..."));
     return;
   }
@@ -359,7 +367,10 @@ void MainWindow::seekToSliderValue() {
     return;
   }
 
-  player_.seekTo(seekSlider_->value());
+  pendingSeekPositionMs_ = seekSlider_->value();
+  if (!player_.seekTo(pendingSeekPositionMs_) && !player_.seekInProgress()) {
+    pendingSeekPositionMs_ = -1;
+  }
   updatePlaybackStatus();
 }
 
