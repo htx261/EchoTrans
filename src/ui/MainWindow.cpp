@@ -8,6 +8,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QMetaObject>
 #include <QPixmap>
 #include <QPushButton>
 #include <QStatusBar>
@@ -38,8 +39,7 @@ MainWindow::MainWindow(QWidget* parent)
       videoLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
-      playbackStatusTimer_(new QTimer(this)),
-      videoFrameTimer_(new QTimer(this)) {
+      playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
   resize(1280, 720);
 
@@ -82,7 +82,12 @@ MainWindow::MainWindow(QWidget* parent)
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
   connect(playbackStatusTimer_, &QTimer::timeout, this, &MainWindow::updatePlaybackStatus);
-  connect(videoFrameTimer_, &QTimer::timeout, this, &MainWindow::updateVideoFrame);
+
+  player_.setVideoFrameCallback([this](const QImage& image, qint64) {
+    QMetaObject::invokeMethod(this, [this, image]() {
+      displayVideoFrame(image);
+    }, Qt::QueuedConnection);
+  });
 
   layout->addWidget(title);
   layout->addWidget(statusLabel_);
@@ -94,6 +99,11 @@ MainWindow::MainWindow(QWidget* parent)
   statusBar()->showMessage(report.isReady()
       ? QStringLiteral("启动检查通过")
       : QStringLiteral("启动检查失败"));
+}
+
+MainWindow::~MainWindow() {
+  player_.setVideoFrameCallback(nullptr);
+  player_.stop();
 }
 
 void MainWindow::openMediaFile() {
@@ -151,7 +161,6 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
 bool MainWindow::startPlayback(const MediaInfo& info) {
   player_.stop();
   playbackStatusTimer_->stop();
-  videoFrameTimer_->stop();
   stopButton_->setEnabled(false);
   displayedVideoFrameCount_ = 0;
 
@@ -174,7 +183,6 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   playbackStatusTimer_->start(300);
   if (info.hasVideo) {
     videoLabel_->setText(QStringLiteral("正在准备视频画面"));
-    videoFrameTimer_->start(33);
   } else {
     videoLabel_->setText(QStringLiteral("当前媒体没有视频画面"));
   }
@@ -184,7 +192,6 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
 
 void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
-  videoFrameTimer_->stop();
   player_.stop();
   stopButton_->setEnabled(false);
   videoLabel_->setText(QStringLiteral("播放已停止"));
@@ -249,15 +256,8 @@ void MainWindow::updatePlaybackStatus() {
   statusBar()->showMessage(QStringLiteral("正在准备音频播放"));
 }
 
-void MainWindow::updateVideoFrame() {
-  QImage image;
-  bool hasFrame = false;
-
-  while (player_.takeVideoFrame(&image)) {
-    hasFrame = true;
-  }
-
-  if (!hasFrame || image.isNull()) {
+void MainWindow::displayVideoFrame(const QImage& image) {
+  if (image.isNull()) {
     return;
   }
 

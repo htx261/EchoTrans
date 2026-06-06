@@ -15,6 +15,7 @@ class MainWindow : public QMainWindow {
 
 public:
   explicit MainWindow(QWidget* parent = nullptr);
+  ~MainWindow() override;
 
   bool startPlayback(const MediaInfo& info);
   void stopPlayback();
@@ -26,7 +27,7 @@ private:
   void onMediaProbeFinished();
   void showMediaInfo(const MediaProbeResult& result);
   void updatePlaybackStatus();
-  void updateVideoFrame();
+  void displayVideoFrame(const QImage& image);
 
   QPushButton* openButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
@@ -35,7 +36,6 @@ private:
   QLabel* mediaInfoLabel_ = nullptr;
   QFutureWatcher<MediaProbeResult>* mediaProbeWatcher_ = nullptr;
   QTimer* playbackStatusTimer_ = nullptr;
-  QTimer* videoFrameTimer_ = nullptr;
   MediaPlayerCore player_;
   std::size_t displayedVideoFrameCount_ = 0;
 };

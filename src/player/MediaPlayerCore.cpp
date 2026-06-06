@@ -1,4 +1,5 @@
 #include "player/MediaPlayerCore.h"
+#include "player/VideoFrameSynchronizer.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -146,6 +147,16 @@ bool receiveDecodedAudioFrames(
     av_frame_unref(frame);
   }
 }
+
+qint64 audioFrameDurationMs(const PlaybackFrame& frame) {
+  const int bytesPerSecond = frame.sampleRate * frame.channelCount * frame.bytesPerSample;
+  if (bytesPerSecond <= 0 || frame.pcmData.isEmpty()) {
+    return 0;
+  }
+
+  return static_cast<qint64>(
+      static_cast<double>(frame.pcmData.size()) * 1000.0 / static_cast<double>(bytesPerSecond));
+}
 }
 
 void AvPacketDeleter::operator()(AVPacket* packet) const {
@@ -219,6 +230,10 @@ std::size_t MediaPlayerCore::audioOutputByteCount() const {
   return audioOutputByteCount_.load();
 }
 
+qint64 MediaPlayerCore::audioClockMs() const {
+  return audioClockMs_.load();
+}
+
 QString MediaPlayerCore::lastAudioDecodeError() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return lastAudioDecodeError_;
@@ -257,6 +272,11 @@ bool MediaPlayerCore::takeVideoFrame(QImage* image) {
   return true;
 }
 
+void MediaPlayerCore::setVideoFrameCallback(std::function<void(const QImage&, qint64)> callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  videoFrameCallback_ = std::move(callback);
+}
+
 QString MediaPlayerCore::lastVideoDecodeError() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return lastVideoDecodeError_;
@@ -279,6 +299,7 @@ bool MediaPlayerCore::open(const QString& filePath) {
   decodedAudioFrameCount_.store(0);
   decodedAudioByteCount_.store(0);
   audioOutputByteCount_.store(0);
+  audioClockMs_.store(0);
   decodedVideoFrameCount_.store(0);
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
@@ -355,6 +376,7 @@ void MediaPlayerCore::startWorkersLocked() {
   decodedAudioFrameCount_.store(0);
   decodedAudioByteCount_.store(0);
   audioOutputByteCount_.store(0);
+  audioClockMs_.store(0);
   decodedVideoFrameCount_.store(0);
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
@@ -898,12 +920,16 @@ void MediaPlayerCore::audioOutputLoop() {
   }
 
   PlaybackFrame frame;
+  PlaybackFrame pendingVideoFrame;
   while (!stopRequested_.load() && queues->audioFrames.waitPop(frame)) {
     if (frame.endOfStream) {
       break;
     }
 
     if (!audioDevice) {
+      const qint64 simulatedClockMs = frame.ptsMs + audioFrameDurationMs(frame);
+      audioClockMs_.store(simulatedClockMs);
+      publishVideoFramesForClock(simulatedClockMs, &pendingVideoFrame);
       continue;
     }
 
@@ -926,6 +952,14 @@ void MediaPlayerCore::audioOutputLoop() {
 
       offset += written;
       audioOutputByteCount_.fetch_add(static_cast<std::size_t>(written));
+      const int bytesPerSecond = frame.sampleRate * frame.channelCount * frame.bytesPerSample;
+      if (bytesPerSecond > 0) {
+        const qint64 frameClockMs = frame.ptsMs
+            + static_cast<qint64>(
+                static_cast<double>(offset) * 1000.0 / static_cast<double>(bytesPerSecond));
+        audioClockMs_.store(frameClockMs);
+        publishVideoFramesForClock(frameClockMs, &pendingVideoFrame);
+      }
     }
   }
 
@@ -936,6 +970,58 @@ void MediaPlayerCore::audioOutputLoop() {
 
   waitUntilStopRequested();
   activeWorkerCount_.fetch_sub(1);
+}
+
+void MediaPlayerCore::publishVideoFramesForClock(qint64 audioClockMs, PlaybackFrame* pendingVideoFrame) {
+  PlaybackQueues* queues = nullptr;
+  std::function<void(const QImage&, qint64)> callback;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queues = playbackQueues_.get();
+    callback = videoFrameCallback_;
+  }
+
+  if (!queues || !callback) {
+    return;
+  }
+
+  auto publishFrame = [&](const PlaybackFrame& frame) {
+    if (!frame.image.isNull()) {
+      callback(frame.image, audioClockMs);
+    }
+  };
+
+  if (pendingVideoFrame && !pendingVideoFrame->image.isNull()) {
+    const VideoFrameDecision decision = VideoFrameSynchronizer::decide(pendingVideoFrame->ptsMs, audioClockMs);
+    if (decision == VideoFrameDecision::Wait) {
+      return;
+    }
+
+    if (decision == VideoFrameDecision::Display) {
+      publishFrame(*pendingVideoFrame);
+    }
+
+    *pendingVideoFrame = PlaybackFrame();
+  }
+
+  PlaybackFrame frame;
+  while (queues->videoFrames.tryPop(frame)) {
+    if (frame.endOfStream) {
+      return;
+    }
+
+    const VideoFrameDecision decision = VideoFrameSynchronizer::decide(frame.ptsMs, audioClockMs);
+    if (decision == VideoFrameDecision::Wait) {
+      if (pendingVideoFrame) {
+        *pendingVideoFrame = std::move(frame);
+      }
+      return;
+    }
+
+    if (decision == VideoFrameDecision::Display) {
+      publishFrame(frame);
+    }
+  }
 }
 
 void MediaPlayerCore::waitUntilStopRequested() {

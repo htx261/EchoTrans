@@ -9,6 +9,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -36,8 +37,10 @@ public:
   std::size_t decodedAudioFrameCount() const;
   std::size_t decodedAudioByteCount() const;
   std::size_t audioOutputByteCount() const;
+  qint64 audioClockMs() const;
   std::size_t decodedVideoFrameCount() const;
   bool takeVideoFrame(QImage* image);
+  void setVideoFrameCallback(std::function<void(const QImage&, qint64)> callback);
   QString lastAudioDecodeError() const;
   QString lastAudioOutputError() const;
   QString lastVideoDecodeError() const;
@@ -53,6 +56,7 @@ private:
   void videoDecodeLoop();
   void audioDecodeLoop();
   void audioOutputLoop();
+  void publishVideoFramesForClock(qint64 audioClockMs, PlaybackFrame* pendingVideoFrame);
   void waitUntilStopRequested();
   void setLastDemuxError(const QString& message);
   void setLastAudioDecodeError(const QString& message);
@@ -67,6 +71,7 @@ private:
   QString lastAudioOutputError_;
   QString lastVideoDecodeError_;
   std::unique_ptr<PlaybackQueues> playbackQueues_;
+  std::function<void(const QImage&, qint64)> videoFrameCallback_;
 
   std::atomic_bool stopRequested_{false};
   std::atomic_bool demuxFinished_{false};
@@ -75,6 +80,7 @@ private:
   std::atomic_size_t decodedAudioFrameCount_{0};
   std::atomic_size_t decodedAudioByteCount_{0};
   std::atomic_size_t audioOutputByteCount_{0};
+  std::atomic<qint64> audioClockMs_{0};
   std::atomic_size_t decodedVideoFrameCount_{0};
   std::atomic_size_t activeWorkerCount_{0};
   std::mutex workerMutex_;

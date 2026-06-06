@@ -8,6 +8,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <cstring>
 
 namespace {
@@ -104,6 +105,7 @@ private slots:
   void audioDecodeThreadProducesPcmFrames();
   void audioOutputThreadConsumesFramesOrReportsDeviceError();
   void videoDecodeThreadProducesImages();
+  void publishesVideoFramesFromAudioClock();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -278,6 +280,28 @@ void MediaPlayerCoreTests::videoDecodeThreadProducesImages() {
   QTRY_VERIFY_WITH_TIMEOUT(player.takeVideoFrame(&image), 1000);
   QVERIFY(!image.isNull());
   QCOMPARE(image.size(), QSize(64, 48));
+}
+
+void MediaPlayerCoreTests::publishesVideoFramesFromAudioClock() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  std::atomic_size_t callbackCount(0);
+  player.setVideoFrameCallback([&](const QImage& image, qint64 audioClockMs) {
+    if (!image.isNull() && audioClockMs >= 0) {
+      callbackCount.fetch_add(1);
+    }
+  });
+
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(player.audioClockMs() > 0, 2000);
+  QTRY_VERIFY_WITH_TIMEOUT(callbackCount.load() > 0, 3000);
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)

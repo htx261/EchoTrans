@@ -166,6 +166,21 @@ target_link_libraries(MediaPlayerCoreTests
 
 echotrans_copy_ffmpeg_runtime(MediaPlayerCoreTests)
 
+add_executable(VideoFrameSynchronizerTests
+  tests/player/VideoFrameSynchronizerTests.cpp
+)
+
+target_include_directories(VideoFrameSynchronizerTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(VideoFrameSynchronizerTests
+  PRIVATE
+    EchoTransPlayer
+    Qt5::Test
+)
+
 add_executable(MainWindowTests
   tests/ui/MainWindowTests.cpp
   src/ui/MainWindow.cpp
@@ -194,3 +209,4 @@ add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
 add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
+add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)
