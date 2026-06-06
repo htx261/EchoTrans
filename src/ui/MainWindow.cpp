@@ -74,6 +74,10 @@ MainWindow::MainWindow(QWidget* parent)
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
       pauseButton_(new QPushButton(QStringLiteral("暂停"), this)),
       stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
+      directPlayButton_(new QPushButton(QStringLiteral("直接播放"), this)),
+      transcribeButton_(new QPushButton(QStringLiteral("生成转录字幕"), this)),
+      translateSubtitleButton_(new QPushButton(QStringLiteral("生成翻译字幕"), this)),
+      cancelSubtitlePreparationButton_(new QPushButton(QStringLiteral("取消转录"), this)),
       statusLabel_(new QLabel(this)),
       videoLabel_(new QLabel(this)),
       subtitleLabel_(new QLabel(this)),
@@ -137,6 +141,12 @@ MainWindow::MainWindow(QWidget* parent)
 
   stopButton_->setEnabled(false);
   pauseButton_->setEnabled(false);
+  directPlayButton_->setObjectName(QStringLiteral("directPlayButton"));
+  transcribeButton_->setObjectName(QStringLiteral("transcribeButton"));
+  translateSubtitleButton_->setObjectName(QStringLiteral("translateSubtitleButton"));
+  cancelSubtitlePreparationButton_->setObjectName(QStringLiteral("cancelSubtitlePreparationButton"));
+  setTaskButtonsEnabled(false);
+  cancelSubtitlePreparationButton_->setEnabled(false);
   pauseButton_->setObjectName(QStringLiteral("pauseButton"));
   seekSlider_->setObjectName(QStringLiteral("seekSlider"));
   seekSlider_->setRange(0, 0);
@@ -147,6 +157,10 @@ MainWindow::MainWindow(QWidget* parent)
   auto* topToolbarLayout = new QHBoxLayout(topToolbar);
   topToolbarLayout->setContentsMargins(0, 0, 0, 0);
   topToolbarLayout->addWidget(openButton_);
+  topToolbarLayout->addWidget(directPlayButton_);
+  topToolbarLayout->addWidget(transcribeButton_);
+  topToolbarLayout->addWidget(translateSubtitleButton_);
+  topToolbarLayout->addWidget(cancelSubtitlePreparationButton_);
   topToolbarLayout->addWidget(pauseButton_);
   topToolbarLayout->addWidget(stopButton_);
   topToolbarLayout->addStretch(1);
@@ -158,6 +172,10 @@ MainWindow::MainWindow(QWidget* parent)
   seekLayout->addWidget(timeLabel_);
 
   connect(openButton_, &QPushButton::clicked, this, &MainWindow::openMediaFile);
+  connect(directPlayButton_, &QPushButton::clicked, this, &MainWindow::startPendingPlayback);
+  connect(transcribeButton_, &QPushButton::clicked, this, &MainWindow::startPendingTranscription);
+  connect(translateSubtitleButton_, &QPushButton::clicked, this, &MainWindow::startPendingTranslation);
+  connect(cancelSubtitlePreparationButton_, &QPushButton::clicked, this, &MainWindow::cancelSubtitlePreparation);
   connect(pauseButton_, &QPushButton::clicked, this, &MainWindow::togglePauseResume);
   connect(stopButton_, &QPushButton::clicked, this, &MainWindow::stopPlayback);
   connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
@@ -223,6 +241,9 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow() {
   ++subtitlePreparationGeneration_;
+  if (subtitlePreparationCancelRequested_) {
+    subtitlePreparationCancelRequested_->store(true);
+  }
   if (subtitlePreparationWatcher_->isRunning()) {
     subtitlePreparationWatcher_->waitForFinished();
   }
@@ -327,7 +348,7 @@ void MainWindow::populateTranscriptionModels() {
 
 void MainWindow::openMediaFile() {
   if (subtitlePreparationWatcher_->isRunning()) {
-    statusBar()->showMessage(QStringLiteral("正在准备字幕，请稍候"));
+    statusBar()->showMessage(QStringLiteral("正在准备字幕，可先取消当前任务"));
     return;
   }
 
@@ -346,6 +367,8 @@ void MainWindow::openMediaFile() {
   subtitleTrack_.setSegments({});
   updateSubtitle(0);
   updateTranscriptPanel(0);
+  setTaskButtonsEnabled(false);
+  cancelSubtitlePreparationButton_->setEnabled(false);
   openButton_->setEnabled(false);
   mediaInfoLabel_->setText(QStringLiteral("读取中..."));
   statusBar()->showMessage(QStringLiteral("正在打开媒体文件"));
@@ -361,9 +384,18 @@ void MainWindow::onMediaProbeFinished() {
 
 void MainWindow::onSubtitlePreparationFinished() {
   openButton_->setEnabled(true);
+  cancelSubtitlePreparationButton_->setEnabled(false);
 
   const MediaSubtitlePreparationResult result = subtitlePreparationWatcher_->result();
+  if (result.canceled) {
+    setTaskButtonsEnabled(true);
+    statusBar()->showMessage(QStringLiteral("转录已取消"));
+    transcriptListLabel_->setText(QStringLiteral("转录已取消"));
+    return;
+  }
+
   if (!result.success) {
+    setTaskButtonsEnabled(true);
     statusBar()->showMessage(QStringLiteral("字幕准备失败：%1").arg(result.errorMessage));
     transcriptListLabel_->setText(QStringLiteral("字幕准备失败"));
     return;
@@ -373,6 +405,7 @@ void MainWindow::onSubtitlePreparationFinished() {
   updateSubtitle(0);
   updateTranscriptPanel(0);
   statusBar()->showMessage(QStringLiteral("字幕准备完成，开始播放"));
+  setTaskButtonsEnabled(false);
   startPlayback(pendingPlaybackInfo_);
 }
 
@@ -388,13 +421,10 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
       .arg(QFileInfo(info.filePath).fileName())
       .arg(formatDuration(info.durationMs)));
 
-  if (info.hasAudio) {
-    startSubtitlePreparation(info);
-  } else {
-    openButton_->setEnabled(true);
-    statusBar()->showMessage(QStringLiteral("媒体没有音频，直接播放"));
-    startPlayback(info);
-  }
+  pendingPlaybackInfo_ = info;
+  openButton_->setEnabled(true);
+  setTaskButtonsEnabled(true);
+  statusBar()->showMessage(QStringLiteral("请选择任务：直接播放、生成转录字幕或生成翻译字幕"));
 }
 
 void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
@@ -410,11 +440,16 @@ void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
 
   transcriptListLabel_->setText(QStringLiteral("正在准备字幕"));
   statusBar()->showMessage(QStringLiteral("正在准备字幕"));
-  subtitlePreparationWatcher_->setFuture(QtConcurrent::run([this, info, options, generation]() {
+  setTaskButtonsEnabled(false);
+  cancelSubtitlePreparationButton_->setEnabled(true);
+  subtitlePreparationCancelRequested_ = std::make_shared<std::atomic_bool>(false);
+  const std::shared_ptr<std::atomic_bool> cancelRequested = subtitlePreparationCancelRequested_;
+  subtitlePreparationWatcher_->setFuture(QtConcurrent::run([this, info, options, generation, cancelRequested]() {
     MediaSubtitlePreparer preparer;
     MediaSubtitlePreparationRequest request;
     request.mediaPath = info.filePath;
     request.options = options;
+    request.cancelRequested = cancelRequested;
     request.progressCallback = [this, generation](const MediaSubtitlePreparationProgress& progress) {
       QMetaObject::invokeMethod(this, [this, generation, progress]() {
         updateSubtitlePreparationProgress(generation, progress);
@@ -422,6 +457,50 @@ void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
     };
     return preparer.prepare(request);
   }));
+}
+
+void MainWindow::startPendingPlayback() {
+  setTaskButtonsEnabled(false);
+  startPlayback(pendingPlaybackInfo_);
+}
+
+void MainWindow::startPendingTranscription() {
+  if (!pendingPlaybackInfo_.hasAudio) {
+    statusBar()->showMessage(QStringLiteral("当前媒体没有音频，直接播放"));
+    startPendingPlayback();
+    return;
+  }
+
+  startSubtitlePreparation(pendingPlaybackInfo_);
+}
+
+void MainWindow::startPendingTranslation() {
+  statusBar()->showMessage(QStringLiteral("翻译字幕功能将在翻译模型接入后启用"));
+}
+
+void MainWindow::cancelSubtitlePreparation() {
+  if (!subtitlePreparationWatcher_->isRunning()) {
+    return;
+  }
+
+  if (subtitlePreparationCancelRequested_) {
+    subtitlePreparationCancelRequested_->store(true);
+  }
+  cancelSubtitlePreparationButton_->setEnabled(false);
+  statusBar()->showMessage(QStringLiteral("正在取消转录..."));
+  transcriptListLabel_->setText(QStringLiteral("正在取消转录..."));
+}
+
+void MainWindow::setTaskButtonsEnabled(bool enabled) {
+  if (directPlayButton_) {
+    directPlayButton_->setEnabled(enabled);
+  }
+  if (transcribeButton_) {
+    transcribeButton_->setEnabled(enabled);
+  }
+  if (translateSubtitleButton_) {
+    translateSubtitleButton_->setEnabled(enabled);
+  }
 }
 
 void MainWindow::updateSubtitlePreparationProgress(

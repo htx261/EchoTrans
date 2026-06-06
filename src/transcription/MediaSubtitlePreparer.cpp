@@ -48,6 +48,17 @@ void reportProgress(
       message});
 }
 
+bool isCanceled(const MediaSubtitlePreparationRequest& request) {
+  return request.cancelRequested && request.cancelRequested->load();
+}
+
+MediaSubtitlePreparationResult canceledResult() {
+  MediaSubtitlePreparationResult result;
+  result.canceled = true;
+  result.errorMessage = QStringLiteral("转录已取消");
+  return result;
+}
+
 void appendSubtitleSegments(SubtitleTrack* track, const QVector<TranscriptionTextSegment>& segments) {
   for (const TranscriptionTextSegment& segment : segments) {
     track->appendSegment(SubtitleSegment{
@@ -124,6 +135,10 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
   QElapsedTimer stageTimer;
 
   stageTimer.start();
+  if (isCanceled(request)) {
+    return canceledResult();
+  }
+
   reportProgress(request, MediaSubtitlePreparationStage::LoadingModel, 0, QStringLiteral("正在加载转录模型"));
   WhisperTranscriber transcriber;
   const TranscriptionLoadResult loadResult = transcriber.loadModel(request.options);
@@ -255,6 +270,12 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
   }
 
   while ((result = av_read_frame(formatContext, packet)) >= 0) {
+    if (isCanceled(request)) {
+      preparationResult = canceledResult();
+      av_packet_unref(packet);
+      break;
+    }
+
     if (packet->stream_index == audioStreamIndex) {
       result = avcodec_send_packet(codecContext, packet);
       if (result >= 0) {
@@ -288,7 +309,7 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
     av_packet_unref(packet);
   }
 
-  if (preparationResult.errorMessage.isEmpty()) {
+  if (preparationResult.errorMessage.isEmpty() && !isCanceled(request)) {
     avcodec_send_packet(codecContext, nullptr);
     result = receiveAudioFrames(
         formatContext,
@@ -315,6 +336,10 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
     return preparationResult;
   }
 
+  if (isCanceled(request)) {
+    return canceledResult();
+  }
+
   reportProgress(
       request,
       MediaSubtitlePreparationStage::ExtractingAudio,
@@ -329,6 +354,10 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
   const QVector<SpeechRange> speechRanges = fixedRanges(audioSamples);
   stageTimer.restart();
   for (int chunkIndex = 0; chunkIndex < speechRanges.size(); ++chunkIndex) {
+    if (isCanceled(request)) {
+      return canceledResult();
+    }
+
     const SpeechRange& range = speechRanges[chunkIndex];
     const int offset = range.startSample;
     const int count = range.endSample - range.startSample;
@@ -354,6 +383,10 @@ MediaSubtitlePreparationResult MediaSubtitlePreparer::prepare(
     if (!transcriptionResult.success) {
       preparationResult.errorMessage = transcriptionResult.errorMessage;
       return preparationResult;
+    }
+
+    if (isCanceled(request)) {
+      return canceledResult();
     }
 
     appendSubtitleSegments(&track, transcriptionResult.segments);

@@ -104,6 +104,7 @@ private slots:
   void stopsPlaybackWhenMediaOpenFails();
   void displaysSubtitleForCurrentPlaybackPosition();
   void showsTranscriptionOptionsWithDescriptions();
+  void showsTaskModeAndCancelControls();
   void usesCompactWorkspaceLayout();
 };
 
@@ -308,6 +309,24 @@ void MainWindowTests::showsTranscriptionOptionsWithDescriptions() {
 
   QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionTranslateCheckBox")));
   QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionWindowSpinBox")));
+}
+
+void MainWindowTests::showsTaskModeAndCancelControls() {
+  MainWindow window;
+
+  auto* directPlayButton = window.findChild<QPushButton*>(QStringLiteral("directPlayButton"));
+  auto* transcribeButton = window.findChild<QPushButton*>(QStringLiteral("transcribeButton"));
+  auto* translateButton = window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton"));
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton"));
+
+  QVERIFY(directPlayButton);
+  QVERIFY(transcribeButton);
+  QVERIFY(translateButton);
+  QVERIFY(cancelButton);
+  QVERIFY(!directPlayButton->isEnabled());
+  QVERIFY(!transcribeButton->isEnabled());
+  QVERIFY(!translateButton->isEnabled());
+  QVERIFY(!cancelButton->isEnabled());
 }
 
 void MainWindowTests::usesCompactWorkspaceLayout() {
