@@ -3,22 +3,32 @@
 #include "core/DependencyReport.h"
 #include "media/FFmpegMediaProbe.h"
 
+#include <QComboBox>
+#include <QDir>
+#include <QFileInfo>
 #include <QFileDialog>
+#include <QFormLayout>
+#include <QFrame>
+#include <QGroupBox>
 #include <QLabel>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QMetaObject>
 #include <QPixmap>
 #include <QPushButton>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <algorithm>
 
 namespace {
 class SeekSlider : public QSlider {
@@ -53,6 +63,10 @@ QString formatDuration(qint64 durationMs) {
       .arg(minutes, 2, 10, QLatin1Char('0'))
       .arg(seconds, 2, 10, QLatin1Char('0'));
 }
+
+QString modelsRootPath() {
+  return QString::fromUtf8(ECHOTRANS_MODELS_ROOT);
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -63,51 +77,63 @@ MainWindow::MainWindow(QWidget* parent)
       statusLabel_(new QLabel(this)),
       videoLabel_(new QLabel(this)),
       subtitleLabel_(new QLabel(this)),
+      subtitleTimeLabel_(new QLabel(this)),
+      transcriptListLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
       timeLabel_(new QLabel(this)),
       seekSlider_(new SeekSlider(this)),
+      transcriptionModelComboBox_(new QComboBox(this)),
+      transcriptionLanguageComboBox_(new QComboBox(this)),
+      transcriptionThreadSpinBox_(new QSpinBox(this)),
+      transcriptionWindowSpinBox_(new QSpinBox(this)),
+      transcriptionPromptEdit_(new QLineEdit(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
       playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
-  resize(1280, 720);
+  resize(1440, 820);
 
   auto* central = new QWidget(this);
   auto* layout = new QVBoxLayout(central);
-
-  auto* title = new QLabel(QStringLiteral("AI 同声传译助手"), central);
-  title->setAlignment(Qt::AlignCenter);
-  QFont titleFont = title->font();
-  titleFont.setPointSize(22);
-  titleFont.setBold(true);
-  title->setFont(titleFont);
+  layout->setContentsMargins(16, 16, 16, 12);
+  layout->setSpacing(12);
 
   const DependencyReport report = DependencyReport::fromConfiguredPaths();
 
-  statusLabel_->setAlignment(Qt::AlignCenter);
-  statusLabel_->setWordWrap(true);
+  statusLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
   QFont statusFont = statusLabel_->font();
-  statusFont.setPointSize(16);
+  statusFont.setPointSize(10);
   statusLabel_->setFont(statusFont);
-  statusLabel_->setText(report.startupMessage());
+  statusLabel_->setText(report.isReady()
+      ? QStringLiteral("依赖正常")
+      : QStringLiteral("依赖异常"));
 
   mediaInfoLabel_->setAlignment(Qt::AlignLeft);
   mediaInfoLabel_->setWordWrap(true);
-  mediaInfoLabel_->setText(QStringLiteral("尚未打开媒体文件"));
+  mediaInfoLabel_->setText(QStringLiteral("未打开文件"));
 
   videoLabel_->setAlignment(Qt::AlignCenter);
   videoLabel_->setMinimumSize(640, 360);
   videoLabel_->setStyleSheet(QStringLiteral("background-color: #101010; color: white;"));
-  videoLabel_->setText(QStringLiteral("尚未显示视频画面"));
+  videoLabel_->setText(QStringLiteral("打开媒体文件后显示画面"));
 
-  subtitleLabel_->setAlignment(Qt::AlignCenter);
+  subtitleLabel_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
   subtitleLabel_->setWordWrap(true);
   subtitleLabel_->setObjectName(QStringLiteral("subtitleLabel"));
   QFont subtitleFont = subtitleLabel_->font();
-  subtitleFont.setPointSize(18);
-  subtitleFont.setBold(true);
+  subtitleFont.setPointSize(15);
   subtitleLabel_->setFont(subtitleFont);
-  subtitleLabel_->setMinimumHeight(44);
-  subtitleLabel_->setStyleSheet(QStringLiteral("color: #f5f5f5; background-color: #202020;"));
+  subtitleLabel_->setMinimumHeight(48);
+  subtitleLabel_->setStyleSheet(QStringLiteral("color: #111827; background-color: #ffffff;"));
+
+  subtitleTimeLabel_->setObjectName(QStringLiteral("subtitleTimeLabel"));
+  subtitleTimeLabel_->setText(QStringLiteral("00:00:00"));
+  subtitleTimeLabel_->setStyleSheet(QStringLiteral("color: #667085;"));
+
+  transcriptListLabel_->setObjectName(QStringLiteral("transcriptListLabel"));
+  transcriptListLabel_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+  transcriptListLabel_->setWordWrap(true);
+  transcriptListLabel_->setText(QStringLiteral("暂无转录字幕"));
+  transcriptListLabel_->setStyleSheet(QStringLiteral("color: #475467;"));
 
   stopButton_->setEnabled(false);
   pauseButton_->setEnabled(false);
@@ -116,10 +142,16 @@ MainWindow::MainWindow(QWidget* parent)
   seekSlider_->setRange(0, 0);
   timeLabel_->setText(QStringLiteral("00:00:00 / 00:00:00"));
 
-  auto* buttonLayout = new QHBoxLayout();
-  buttonLayout->addWidget(openButton_);
-  buttonLayout->addWidget(pauseButton_);
-  buttonLayout->addWidget(stopButton_);
+  auto* topToolbar = new QWidget(central);
+  topToolbar->setObjectName(QStringLiteral("topToolbar"));
+  auto* topToolbarLayout = new QHBoxLayout(topToolbar);
+  topToolbarLayout->setContentsMargins(0, 0, 0, 0);
+  topToolbarLayout->addWidget(openButton_);
+  topToolbarLayout->addWidget(pauseButton_);
+  topToolbarLayout->addWidget(stopButton_);
+  topToolbarLayout->addStretch(1);
+  topToolbarLayout->addWidget(mediaInfoLabel_, 1);
+  topToolbarLayout->addWidget(statusLabel_);
 
   auto* seekLayout = new QHBoxLayout();
   seekLayout->addWidget(seekSlider_, 1);
@@ -139,13 +171,47 @@ MainWindow::MainWindow(QWidget* parent)
     }, Qt::QueuedConnection);
   });
 
-  layout->addWidget(title);
-  layout->addWidget(statusLabel_);
-  layout->addLayout(buttonLayout);
-  layout->addWidget(videoLabel_, 1);
-  layout->addWidget(subtitleLabel_);
-  layout->addLayout(seekLayout);
-  layout->addWidget(mediaInfoLabel_);
+  auto* mainWorkspace = new QWidget(central);
+  mainWorkspace->setObjectName(QStringLiteral("mainWorkspace"));
+  auto* workspaceLayout = new QHBoxLayout(mainWorkspace);
+  workspaceLayout->setContentsMargins(0, 0, 0, 0);
+  workspaceLayout->setSpacing(12);
+
+  auto* leftPane = new QWidget(mainWorkspace);
+  auto* leftLayout = new QVBoxLayout(leftPane);
+  leftLayout->setContentsMargins(0, 0, 0, 0);
+  leftLayout->setSpacing(10);
+  leftLayout->addWidget(videoLabel_, 1);
+  leftLayout->addLayout(seekLayout);
+
+  auto* currentSubtitlePanel = new QGroupBox(QStringLiteral("当前字幕"), leftPane);
+  currentSubtitlePanel->setObjectName(QStringLiteral("currentSubtitlePanel"));
+  auto* currentSubtitleLayout = new QVBoxLayout(currentSubtitlePanel);
+  auto* subtitleHeaderLayout = new QHBoxLayout();
+  subtitleHeaderLayout->addStretch(1);
+  subtitleHeaderLayout->addWidget(subtitleTimeLabel_);
+  currentSubtitleLayout->addLayout(subtitleHeaderLayout);
+  currentSubtitleLayout->addWidget(subtitleLabel_);
+  leftLayout->addWidget(currentSubtitlePanel);
+
+  auto* rightPane = new QWidget(mainWorkspace);
+  rightPane->setMinimumWidth(420);
+  auto* rightLayout = new QVBoxLayout(rightPane);
+  rightLayout->setContentsMargins(0, 0, 0, 0);
+  rightLayout->setSpacing(10);
+  setupTranscriptionOptions(rightLayout, rightPane);
+
+  auto* transcriptPanel = new QGroupBox(QStringLiteral("转录字幕"), rightPane);
+  transcriptPanel->setObjectName(QStringLiteral("transcriptPanel"));
+  auto* transcriptLayout = new QVBoxLayout(transcriptPanel);
+  transcriptLayout->addWidget(transcriptListLabel_, 1);
+  rightLayout->addWidget(transcriptPanel, 1);
+
+  workspaceLayout->addWidget(leftPane, 3);
+  workspaceLayout->addWidget(rightPane, 2);
+
+  layout->addWidget(topToolbar);
+  layout->addWidget(mainWorkspace, 1);
   setCentralWidget(central);
 
   statusBar()->showMessage(report.isReady()
@@ -156,6 +222,115 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow() {
   player_.setVideoFrameCallback(nullptr);
   player_.stop();
+}
+
+QLabel* MainWindow::createOptionDescription(const QString& objectName, const QString& text, QWidget* parent) {
+  auto* description = new QLabel(text, parent);
+  description->setObjectName(objectName);
+  description->setWordWrap(true);
+  QFont descriptionFont = description->font();
+  descriptionFont.setPointSize(std::max(8, descriptionFont.pointSize() - 1));
+  description->setFont(descriptionFont);
+  description->setStyleSheet(QStringLiteral("color: #666666;"));
+  return description;
+}
+
+void MainWindow::setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent) {
+  auto* group = new QGroupBox(QStringLiteral("转录选项"), parent);
+  group->setObjectName(QStringLiteral("transcriptionOptionsPanel"));
+  auto* groupLayout = new QFormLayout(group);
+  groupLayout->setLabelAlignment(Qt::AlignRight);
+  groupLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+  transcriptionModelComboBox_->setObjectName(QStringLiteral("transcriptionModelComboBox"));
+  populateTranscriptionModels();
+  auto* modelContainer = new QWidget(group);
+  auto* modelLayout = new QVBoxLayout(modelContainer);
+  modelLayout->setContentsMargins(0, 0, 0, 0);
+  modelLayout->addWidget(transcriptionModelComboBox_);
+  modelLayout->addWidget(createOptionDescription(
+      QStringLiteral("transcriptionModelDescription"),
+      QStringLiteral("选择 models/whisper 目录下的 whisper.cpp .bin 模型文件。"),
+      modelContainer));
+  groupLayout->addRow(QStringLiteral("模型文件"), modelContainer);
+
+  transcriptionLanguageComboBox_->setObjectName(QStringLiteral("transcriptionLanguageComboBox"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("自动检测"), QString());
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("英语"), QStringLiteral("en"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("中文"), QStringLiteral("zh"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("日语"), QStringLiteral("ja"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("韩语"), QStringLiteral("ko"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("法语"), QStringLiteral("fr"));
+  transcriptionLanguageComboBox_->addItem(QStringLiteral("德语"), QStringLiteral("de"));
+  auto* languageContainer = new QWidget(group);
+  auto* languageLayout = new QVBoxLayout(languageContainer);
+  languageLayout->setContentsMargins(0, 0, 0, 0);
+  languageLayout->addWidget(transcriptionLanguageComboBox_);
+  languageLayout->addWidget(createOptionDescription(
+      QStringLiteral("transcriptionLanguageDescription"),
+      QStringLiteral("只用于识别语音所属语言；whisper.cpp 不负责翻译。"),
+      languageContainer));
+  groupLayout->addRow(QStringLiteral("语言"), languageContainer);
+
+  const int maxThreads = TranscriptionOptions::maxThreadCount();
+  transcriptionThreadSpinBox_->setObjectName(QStringLiteral("transcriptionThreadSpinBox"));
+  transcriptionThreadSpinBox_->setRange(1, maxThreads);
+  transcriptionThreadSpinBox_->setValue(TranscriptionOptions::defaults().threadCount);
+  auto* threadContainer = new QWidget(group);
+  auto* threadLayout = new QVBoxLayout(threadContainer);
+  threadLayout->setContentsMargins(0, 0, 0, 0);
+  threadLayout->addWidget(transcriptionThreadSpinBox_);
+  threadLayout->addWidget(createOptionDescription(
+      QStringLiteral("transcriptionThreadDescription"),
+      QStringLiteral("控制 whisper.cpp 推理线程数，当前最大可用线程数为 %1。").arg(maxThreads),
+      threadContainer));
+  groupLayout->addRow(QStringLiteral("线程数"), threadContainer);
+
+  transcriptionWindowSpinBox_->setObjectName(QStringLiteral("transcriptionWindowSpinBox"));
+  transcriptionWindowSpinBox_->setRange(1, 60);
+  transcriptionWindowSpinBox_->setSuffix(QStringLiteral(" 秒"));
+  transcriptionWindowSpinBox_->setValue(10);
+  auto* windowContainer = new QWidget(group);
+  auto* windowLayout = new QVBoxLayout(windowContainer);
+  windowLayout->setContentsMargins(0, 0, 0, 0);
+  windowLayout->addWidget(transcriptionWindowSpinBox_);
+  windowLayout->addWidget(createOptionDescription(
+      QStringLiteral("transcriptionWindowDescription"),
+      QStringLiteral("后续实时转录时每次送入模型的音频窗口长度。"),
+      windowContainer));
+  groupLayout->addRow(QStringLiteral("分段窗口"), windowContainer);
+
+  transcriptionPromptEdit_->setObjectName(QStringLiteral("transcriptionPromptEdit"));
+  transcriptionPromptEdit_->setPlaceholderText(QStringLiteral("可填写会议主题、课程术语或专有名词"));
+  auto* promptContainer = new QWidget(group);
+  auto* promptLayout = new QVBoxLayout(promptContainer);
+  promptLayout->setContentsMargins(0, 0, 0, 0);
+  promptLayout->addWidget(transcriptionPromptEdit_);
+  promptLayout->addWidget(createOptionDescription(
+      QStringLiteral("transcriptionPromptDescription"),
+      QStringLiteral("作为上下文提示词传给 whisper.cpp，提高专有名词识别稳定性。"),
+      promptContainer));
+  groupLayout->addRow(QStringLiteral("Prompt"), promptContainer);
+
+  layout->addWidget(group);
+}
+
+void MainWindow::populateTranscriptionModels() {
+  transcriptionModelComboBox_->clear();
+
+  const QDir whisperModelDir(modelsRootPath() + QStringLiteral("/whisper"));
+  const QFileInfoList models = whisperModelDir.entryInfoList(
+      QStringList() << QStringLiteral("*.bin"),
+      QDir::Files,
+      QDir::Name);
+
+  for (const QFileInfo& model : models) {
+    transcriptionModelComboBox_->addItem(model.fileName(), model.absoluteFilePath());
+  }
+
+  if (transcriptionModelComboBox_->count() == 0) {
+    transcriptionModelComboBox_->addItem(QStringLiteral("未找到 whisper 模型"), QString());
+  }
 }
 
 void MainWindow::openMediaFile() {
@@ -171,7 +346,7 @@ void MainWindow::openMediaFile() {
 
   stopPlayback();
   openButton_->setEnabled(false);
-  mediaInfoLabel_->setText(QStringLiteral("正在读取媒体信息..."));
+  mediaInfoLabel_->setText(QStringLiteral("读取中..."));
   statusBar()->showMessage(QStringLiteral("正在打开媒体文件"));
 
   mediaProbeWatcher_->setFuture(QtConcurrent::run([filePath]() {
@@ -186,25 +361,15 @@ void MainWindow::onMediaProbeFinished() {
 
 void MainWindow::showMediaInfo(const MediaProbeResult& result) {
   if (!result.success) {
-    mediaInfoLabel_->setText(QStringLiteral("媒体打开失败：%1").arg(result.errorMessage));
+    mediaInfoLabel_->setText(QStringLiteral("打开失败"));
     statusBar()->showMessage(QStringLiteral("媒体打开失败"));
     return;
   }
 
   const MediaInfo& info = result.info;
-  mediaInfoLabel_->setText(QStringLiteral(
-      "文件：%1\n"
-      "时长：%2\n"
-      "视频流：%3\n"
-      "音频流：%4")
-      .arg(info.filePath)
-      .arg(formatDuration(info.durationMs))
-      .arg(info.hasVideo
-          ? QStringLiteral("存在，流索引 %1").arg(info.videoStreamIndex)
-          : QStringLiteral("无"))
-      .arg(info.hasAudio
-          ? QStringLiteral("存在，流索引 %1").arg(info.audioStreamIndex)
-          : QStringLiteral("无")));
+  mediaInfoLabel_->setText(QStringLiteral("%1  %2")
+      .arg(QFileInfo(info.filePath).fileName())
+      .arg(formatDuration(info.durationMs)));
 
   statusBar()->showMessage(QStringLiteral("媒体信息读取完成"));
   startPlayback(info);
@@ -265,7 +430,9 @@ void MainWindow::stopPlayback() {
   seekSlider_->setValue(0);
   updateTimeLabel(0);
   updateSubtitle(0);
-  videoLabel_->setText(QStringLiteral("播放已停止"));
+  updateTranscriptPanel(0);
+  videoLabel_->setText(QStringLiteral("打开媒体文件后显示画面"));
+  mediaInfoLabel_->setText(QStringLiteral("未打开文件"));
   statusBar()->showMessage(QStringLiteral("播放已停止"));
 }
 
@@ -284,6 +451,28 @@ bool MainWindow::seekInProgress() const {
 void MainWindow::setSubtitleTrack(const SubtitleTrack& track) {
   subtitleTrack_ = track;
   updateSubtitle(player_.audioClockMs());
+  updateTranscriptPanel(player_.audioClockMs());
+}
+
+TranscriptionOptions MainWindow::transcriptionOptions() const {
+  TranscriptionOptions options = TranscriptionOptions::defaults();
+  options.modelPath = transcriptionModelComboBox_
+      ? transcriptionModelComboBox_->currentData().toString()
+      : QString();
+  options.languageCode = transcriptionLanguageComboBox_
+      ? transcriptionLanguageComboBox_->currentData().toString()
+      : QString();
+  options.threadCount = transcriptionThreadSpinBox_
+      ? transcriptionThreadSpinBox_->value()
+      : options.threadCount;
+  options.segmentWindowMs = transcriptionWindowSpinBox_
+      ? transcriptionWindowSpinBox_->value() * 1000
+      : options.segmentWindowMs;
+  options.initialPrompt = transcriptionPromptEdit_
+      ? transcriptionPromptEdit_->text()
+      : QString();
+  options.timestampsEnabled = true;
+  return options;
 }
 
 void MainWindow::updatePlaybackStatus() {
@@ -333,6 +522,7 @@ void MainWindow::updatePlaybackStatus() {
   }
   updateTimeLabel(positionMs);
   updateSubtitle(positionMs);
+  updateTranscriptPanel(positionMs);
 
   pauseButton_->setText(player_.state() == PlaybackState::Paused
       ? QStringLiteral("继续")
@@ -405,6 +595,7 @@ void MainWindow::seekToSliderValue() {
 
   pendingSeekPositionMs_ = seekSlider_->value();
   updateSubtitle(pendingSeekPositionMs_);
+  updateTranscriptPanel(pendingSeekPositionMs_);
   if (!player_.seekTo(pendingSeekPositionMs_) && !player_.seekInProgress()) {
     pendingSeekPositionMs_ = -1;
   }
@@ -425,5 +616,20 @@ void MainWindow::updateSubtitle(qint64 positionMs) {
     return;
   }
 
-  subtitleLabel_->setText(subtitleTrack_.textAt(positionMs));
+  const QString text = subtitleTrack_.textAt(positionMs);
+  subtitleTimeLabel_->setText(formatDuration(positionMs));
+  subtitleLabel_->setText(text.isEmpty()
+      ? QStringLiteral("暂无当前字幕")
+      : text);
+}
+
+void MainWindow::updateTranscriptPanel(qint64 positionMs) {
+  if (!transcriptListLabel_) {
+    return;
+  }
+
+  const QString text = subtitleTrack_.textAt(positionMs);
+  transcriptListLabel_->setText(text.isEmpty()
+      ? QStringLiteral("暂无转录字幕")
+      : QStringLiteral("%1\n\n%2").arg(formatDuration(positionMs), text));
 }

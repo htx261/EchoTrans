@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QCoreApplication>
 #include <QLabel>
+#include <QSpinBox>
 #include <QProcess>
 #include <QPushButton>
 #include <QSlider>
@@ -102,6 +103,8 @@ private slots:
   void updatesControlsWhenPlaybackFinishes();
   void stopsPlaybackWhenMediaOpenFails();
   void displaysSubtitleForCurrentPlaybackPosition();
+  void showsTranscriptionOptionsWithDescriptions();
+  void usesCompactWorkspaceLayout();
 };
 
 void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
@@ -278,6 +281,47 @@ void MainWindowTests::displaysSubtitleForCurrentPlaybackPosition() {
   QMetaObject::invokeMethod(seekSlider, "sliderReleased", Qt::DirectConnection);
 
   QCOMPARE(subtitleLabel->text(), QStringLiteral("架构"));
+}
+
+void MainWindowTests::showsTranscriptionOptionsWithDescriptions() {
+  MainWindow window;
+
+  const QStringList descriptionObjectNames = {
+      QStringLiteral("transcriptionModelDescription"),
+      QStringLiteral("transcriptionLanguageDescription"),
+      QStringLiteral("transcriptionThreadDescription"),
+      QStringLiteral("transcriptionWindowDescription"),
+      QStringLiteral("transcriptionPromptDescription")
+  };
+
+  for (const QString& objectName : descriptionObjectNames) {
+    auto* description = window.findChild<QLabel*>(objectName);
+    QVERIFY2(description, qPrintable(objectName));
+    QVERIFY2(!description->text().trimmed().isEmpty(), qPrintable(objectName));
+  }
+
+  auto* threadSpinBox = window.findChild<QSpinBox*>(QStringLiteral("transcriptionThreadSpinBox"));
+  auto* threadDescription = window.findChild<QLabel*>(QStringLiteral("transcriptionThreadDescription"));
+  QVERIFY(threadSpinBox);
+  QVERIFY(threadDescription);
+  QVERIFY(threadSpinBox->maximum() >= threadSpinBox->value());
+  QVERIFY(threadDescription->text().contains(QString::number(threadSpinBox->maximum())));
+
+  QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionTranslateCheckBox")));
+}
+
+void MainWindowTests::usesCompactWorkspaceLayout() {
+  MainWindow window;
+
+  QVERIFY(window.findChild<QWidget*>(QStringLiteral("topToolbar")));
+  QVERIFY(window.findChild<QWidget*>(QStringLiteral("mainWorkspace")));
+  QVERIFY(window.findChild<QWidget*>(QStringLiteral("currentSubtitlePanel")));
+  QVERIFY(window.findChild<QWidget*>(QStringLiteral("transcriptPanel")));
+
+  const auto labels = window.findChildren<QLabel*>();
+  for (QLabel* label : labels) {
+    QVERIFY(label->text() != QStringLiteral("AI 同声传译助手"));
+  }
 }
 
 QTEST_MAIN(MainWindowTests)
