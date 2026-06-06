@@ -85,9 +85,9 @@ MainWindow::MainWindow(QWidget* parent)
       transcriptionModelComboBox_(new QComboBox(this)),
       transcriptionLanguageComboBox_(new QComboBox(this)),
       transcriptionThreadSpinBox_(new QSpinBox(this)),
-      transcriptionWindowSpinBox_(new QSpinBox(this)),
       transcriptionPromptEdit_(new QLineEdit(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
+      subtitlePreparationWatcher_(new QFutureWatcher<MediaSubtitlePreparationResult>(this)),
       playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
   resize(1440, 820);
@@ -163,6 +163,8 @@ MainWindow::MainWindow(QWidget* parent)
   connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
+  connect(subtitlePreparationWatcher_, &QFutureWatcher<MediaSubtitlePreparationResult>::finished,
+      this, &MainWindow::onSubtitlePreparationFinished);
   connect(playbackStatusTimer_, &QTimer::timeout, this, &MainWindow::updatePlaybackStatus);
 
   player_.setVideoFrameCallback([this](const QImage& image, qint64) {
@@ -220,6 +222,10 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() {
+  ++subtitlePreparationGeneration_;
+  if (subtitlePreparationWatcher_->isRunning()) {
+    subtitlePreparationWatcher_->waitForFinished();
+  }
   player_.setVideoFrameCallback(nullptr);
   player_.stop();
 }
@@ -286,20 +292,6 @@ void MainWindow::setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent)
       threadContainer));
   groupLayout->addRow(QStringLiteral("线程数"), threadContainer);
 
-  transcriptionWindowSpinBox_->setObjectName(QStringLiteral("transcriptionWindowSpinBox"));
-  transcriptionWindowSpinBox_->setRange(1, 60);
-  transcriptionWindowSpinBox_->setSuffix(QStringLiteral(" 秒"));
-  transcriptionWindowSpinBox_->setValue(10);
-  auto* windowContainer = new QWidget(group);
-  auto* windowLayout = new QVBoxLayout(windowContainer);
-  windowLayout->setContentsMargins(0, 0, 0, 0);
-  windowLayout->addWidget(transcriptionWindowSpinBox_);
-  windowLayout->addWidget(createOptionDescription(
-      QStringLiteral("transcriptionWindowDescription"),
-      QStringLiteral("后续实时转录时每次送入模型的音频窗口长度。"),
-      windowContainer));
-  groupLayout->addRow(QStringLiteral("分段窗口"), windowContainer);
-
   transcriptionPromptEdit_->setObjectName(QStringLiteral("transcriptionPromptEdit"));
   transcriptionPromptEdit_->setPlaceholderText(QStringLiteral("可填写会议主题、课程术语或专有名词"));
   auto* promptContainer = new QWidget(group);
@@ -334,6 +326,11 @@ void MainWindow::populateTranscriptionModels() {
 }
 
 void MainWindow::openMediaFile() {
+  if (subtitlePreparationWatcher_->isRunning()) {
+    statusBar()->showMessage(QStringLiteral("正在准备字幕，请稍候"));
+    return;
+  }
+
   const QString filePath = QFileDialog::getOpenFileName(
       this,
       QStringLiteral("打开媒体文件"),
@@ -345,6 +342,10 @@ void MainWindow::openMediaFile() {
   }
 
   stopPlayback();
+  ++subtitlePreparationGeneration_;
+  subtitleTrack_.setSegments({});
+  updateSubtitle(0);
+  updateTranscriptPanel(0);
   openButton_->setEnabled(false);
   mediaInfoLabel_->setText(QStringLiteral("读取中..."));
   statusBar()->showMessage(QStringLiteral("正在打开媒体文件"));
@@ -355,8 +356,24 @@ void MainWindow::openMediaFile() {
 }
 
 void MainWindow::onMediaProbeFinished() {
-  openButton_->setEnabled(true);
   showMediaInfo(mediaProbeWatcher_->result());
+}
+
+void MainWindow::onSubtitlePreparationFinished() {
+  openButton_->setEnabled(true);
+
+  const MediaSubtitlePreparationResult result = subtitlePreparationWatcher_->result();
+  if (!result.success) {
+    statusBar()->showMessage(QStringLiteral("字幕准备失败：%1").arg(result.errorMessage));
+    transcriptListLabel_->setText(QStringLiteral("字幕准备失败"));
+    return;
+  }
+
+  subtitleTrack_ = result.subtitleTrack;
+  updateSubtitle(0);
+  updateTranscriptPanel(0);
+  statusBar()->showMessage(QStringLiteral("字幕准备完成，开始播放"));
+  startPlayback(pendingPlaybackInfo_);
 }
 
 void MainWindow::showMediaInfo(const MediaProbeResult& result) {
@@ -371,8 +388,54 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
       .arg(QFileInfo(info.filePath).fileName())
       .arg(formatDuration(info.durationMs)));
 
-  statusBar()->showMessage(QStringLiteral("媒体信息读取完成"));
-  startPlayback(info);
+  if (info.hasAudio) {
+    startSubtitlePreparation(info);
+  } else {
+    openButton_->setEnabled(true);
+    statusBar()->showMessage(QStringLiteral("媒体没有音频，直接播放"));
+    startPlayback(info);
+  }
+}
+
+void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
+  pendingPlaybackInfo_ = info;
+  const int generation = ++subtitlePreparationGeneration_;
+  const TranscriptionOptions options = transcriptionOptions();
+  if (options.modelPath.trimmed().isEmpty()) {
+    openButton_->setEnabled(true);
+    statusBar()->showMessage(QStringLiteral("未选择转录模型，无法准备字幕"));
+    transcriptListLabel_->setText(QStringLiteral("未选择转录模型"));
+    return;
+  }
+
+  transcriptListLabel_->setText(QStringLiteral("正在准备字幕"));
+  statusBar()->showMessage(QStringLiteral("正在准备字幕"));
+  subtitlePreparationWatcher_->setFuture(QtConcurrent::run([this, info, options, generation]() {
+    MediaSubtitlePreparer preparer;
+    MediaSubtitlePreparationRequest request;
+    request.mediaPath = info.filePath;
+    request.options = options;
+    request.progressCallback = [this, generation](const MediaSubtitlePreparationProgress& progress) {
+      QMetaObject::invokeMethod(this, [this, generation, progress]() {
+        updateSubtitlePreparationProgress(generation, progress);
+      }, Qt::QueuedConnection);
+    };
+    return preparer.prepare(request);
+  }));
+}
+
+void MainWindow::updateSubtitlePreparationProgress(
+    int generation,
+    const MediaSubtitlePreparationProgress& progress) {
+  if (generation != subtitlePreparationGeneration_) {
+    return;
+  }
+
+  const QString message = progress.percent > 0
+      ? QStringLiteral("%1 %2%").arg(progress.message).arg(progress.percent)
+      : progress.message;
+  statusBar()->showMessage(message);
+  transcriptListLabel_->setText(message);
 }
 
 bool MainWindow::startPlayback(const MediaInfo& info) {
@@ -389,6 +452,7 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   seekSlider_->setValue(0);
   updateTimeLabel(0);
   updateSubtitle(0);
+  updateTranscriptPanel(0);
 
   if (!info.hasAudio && !info.hasVideo) {
     statusBar()->showMessage(QStringLiteral("媒体没有可播放的音视频流"));
@@ -465,9 +529,6 @@ TranscriptionOptions MainWindow::transcriptionOptions() const {
   options.threadCount = transcriptionThreadSpinBox_
       ? transcriptionThreadSpinBox_->value()
       : options.threadCount;
-  options.segmentWindowMs = transcriptionWindowSpinBox_
-      ? transcriptionWindowSpinBox_->value() * 1000
-      : options.segmentWindowMs;
   options.initialPrompt = transcriptionPromptEdit_
       ? transcriptionPromptEdit_->text()
       : QString();
@@ -628,8 +689,28 @@ void MainWindow::updateTranscriptPanel(qint64 positionMs) {
     return;
   }
 
-  const QString text = subtitleTrack_.textAt(positionMs);
-  transcriptListLabel_->setText(text.isEmpty()
-      ? QStringLiteral("暂无转录字幕")
-      : QStringLiteral("%1\n\n%2").arg(formatDuration(positionMs), text));
+  const QVector<SubtitleSegment> segments = subtitleTrack_.segments();
+  if (segments.isEmpty()) {
+    transcriptListLabel_->setText(QStringLiteral("暂无转录字幕"));
+    return;
+  }
+
+  QStringList lines;
+  const int firstIndex = std::max(0, segments.size() - 8);
+  for (int index = firstIndex; index < segments.size(); ++index) {
+    const SubtitleSegment& segment = segments[index];
+    const QString text = segment.translatedText.isEmpty()
+        ? segment.sourceText
+        : segment.translatedText;
+    lines.push_back(QStringLiteral("#%1  %2 -> %3\n%4")
+        .arg(index + 1)
+        .arg(formatDuration(segment.startMs))
+        .arg(formatDuration(segment.endMs))
+        .arg(text));
+  }
+
+  const QString currentText = subtitleTrack_.textAt(positionMs);
+  transcriptListLabel_->setText(currentText.isEmpty()
+      ? lines.join(QStringLiteral("\n\n"))
+      : QStringLiteral("当前：%1\n\n%2").arg(currentText, lines.join(QStringLiteral("\n\n"))));
 }

@@ -17,7 +17,6 @@ TranscriptionOptions TranscriptionOptions::defaults() {
   TranscriptionOptions options;
   const int maxThreads = maxThreadCount();
   options.threadCount = std::max(1, std::min(4, maxThreads));
-  options.segmentWindowMs = 10000;
   options.timestampsEnabled = true;
   return options;
 }
@@ -66,4 +65,72 @@ bool WhisperTranscriber::isModelLoaded() const {
 
 TranscriptionOptions WhisperTranscriber::options() const {
   return options_;
+}
+
+TranscriptionResult WhisperTranscriber::transcribe(const TranscriptionAudioInput& audio) {
+  return transcribe(audio.startPtsMs, audio.samples.constData(), audio.samples.size());
+}
+
+TranscriptionResult WhisperTranscriber::transcribe(
+    qint64 startPtsMs,
+    const float* samples,
+    int sampleCount) {
+  if (!context_) {
+    return TranscriptionResult{false, QStringLiteral("转录模型未加载"), {}};
+  }
+
+  if (!samples || sampleCount <= 0) {
+    return TranscriptionResult{true, QString(), {}};
+  }
+
+  whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+  params.print_realtime = false;
+  params.print_progress = false;
+  params.print_timestamps = false;
+  params.print_special = false;
+  params.translate = false;
+  params.no_context = false;
+  params.single_segment = false;
+  params.n_threads = options_.threadCount;
+
+  const QByteArray languageBytes = options_.languageCode.trimmed().toUtf8();
+  if (!languageBytes.isEmpty()) {
+    params.language = languageBytes.constData();
+  }
+
+  const QByteArray promptBytes = options_.initialPrompt.trimmed().toUtf8();
+  if (!promptBytes.isEmpty()) {
+    params.initial_prompt = promptBytes.constData();
+  }
+
+  const int result = whisper_full(
+      context_,
+      params,
+      samples,
+      sampleCount);
+  if (result != 0) {
+    return TranscriptionResult{false, QStringLiteral("whisper.cpp 转录失败"), {}};
+  }
+
+  TranscriptionResult transcriptionResult;
+  transcriptionResult.success = true;
+
+  const int segmentCount = whisper_full_n_segments(context_);
+  transcriptionResult.segments.reserve(segmentCount);
+  for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex) {
+    const char* text = whisper_full_get_segment_text(context_, segmentIndex);
+    const qint64 startMs = startPtsMs + whisper_full_get_segment_t0(context_, segmentIndex) * 10;
+    const qint64 endMs = startPtsMs + whisper_full_get_segment_t1(context_, segmentIndex) * 10;
+    const QString segmentText = QString::fromUtf8(text).trimmed();
+    if (segmentText.isEmpty()) {
+      continue;
+    }
+
+    transcriptionResult.segments.push_back(TranscriptionTextSegment{
+        startMs,
+        std::max(startMs + 1, endMs),
+        segmentText});
+  }
+
+  return transcriptionResult;
 }

@@ -290,7 +290,6 @@ void MainWindowTests::showsTranscriptionOptionsWithDescriptions() {
       QStringLiteral("transcriptionModelDescription"),
       QStringLiteral("transcriptionLanguageDescription"),
       QStringLiteral("transcriptionThreadDescription"),
-      QStringLiteral("transcriptionWindowDescription"),
       QStringLiteral("transcriptionPromptDescription")
   };
 
@@ -308,6 +307,7 @@ void MainWindowTests::showsTranscriptionOptionsWithDescriptions() {
   QVERIFY(threadDescription->text().contains(QString::number(threadSpinBox->maximum())));
 
   QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionTranslateCheckBox")));
+  QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionWindowSpinBox")));
 }
 
 void MainWindowTests::usesCompactWorkspaceLayout() {

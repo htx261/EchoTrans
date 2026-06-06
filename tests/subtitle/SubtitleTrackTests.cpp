@@ -9,6 +9,7 @@ private slots:
   void returnsTranslatedTextForActiveSegment();
   void fallsBackToSourceTextWhenTranslationIsEmpty();
   void returnsEmptyTextWhenNoSegmentMatches();
+  void appendsLiveSegmentsInTimeOrder();
 };
 
 void SubtitleTrackTests::returnsTranslatedTextForActiveSegment() {
@@ -38,6 +39,18 @@ void SubtitleTrackTests::returnsEmptyTextWhenNoSegmentMatches() {
 
   QVERIFY(track.textAt(500).isEmpty());
   QVERIFY(track.textAt(2000).isEmpty());
+}
+
+void SubtitleTrackTests::appendsLiveSegmentsInTimeOrder() {
+  SubtitleTrack track;
+
+  track.appendSegment(SubtitleSegment{1000, 2000, QStringLiteral("Second"), QString()});
+  track.appendSegment(SubtitleSegment{0, 1000, QStringLiteral("First"), QString()});
+
+  QCOMPARE(track.textAt(500), QStringLiteral("First"));
+  QCOMPARE(track.textAt(1500), QStringLiteral("Second"));
+  QCOMPARE(track.segments().size(), 2);
+  QCOMPARE(track.segments()[0].sourceText, QStringLiteral("First"));
 }
 
 QTEST_MAIN(SubtitleTrackTests)

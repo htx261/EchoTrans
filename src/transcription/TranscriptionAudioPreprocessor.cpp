@@ -13,7 +13,7 @@ TranscriptionAudioPreprocessor::TranscriptionAudioPreprocessor(
     options_.targetChannelCount = 1;
   }
   if (options_.segmentWindowMs <= 0) {
-    options_.segmentWindowMs = 10000;
+    options_.segmentWindowMs = 2000;
   }
 }
 
