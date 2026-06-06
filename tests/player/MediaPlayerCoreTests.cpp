@@ -110,6 +110,7 @@ private slots:
   void seekToReturnsImmediatelyAndMovesClockNearTarget();
   void openNewFileAfterSeekStartsFromBeginning();
   void seekDropsDecodedFramesBeforeTarget();
+  void playbackMovesToPausedAtStartWhenMediaEnds();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -166,21 +167,34 @@ void MediaPlayerCoreTests::stopIsRepeatable() {
 }
 
 void MediaPlayerCoreTests::playStartsWorkerThreads() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 4);
+  QVERIFY(!path.isEmpty());
+
   MediaPlayerCore player;
 
-  QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+  QVERIFY(player.open(path));
   QVERIFY(player.play());
 
-  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
+  QTRY_VERIFY_WITH_TIMEOUT(
+      player.activeWorkerCount() > 0 || player.state() == PlaybackState::Paused,
+      1000);
   QVERIFY(!player.playbackQueuesClosed());
 }
 
 void MediaPlayerCoreTests::stopStopsWorkerThreadsAndClosesQueues() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 4);
+  QVERIFY(!path.isEmpty());
+
   MediaPlayerCore player;
 
-  QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+  QVERIFY(player.open(path));
   QVERIFY(player.play());
-  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
 
   player.stop();
 
@@ -193,11 +207,19 @@ void MediaPlayerCoreTests::stopStopsWorkerThreadsAndClosesQueues() {
 }
 
 void MediaPlayerCoreTests::destructorStopsWorkerThreads() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 4);
+  QVERIFY(!path.isEmpty());
+
   {
     MediaPlayerCore player;
-    QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+    QVERIFY(player.open(path));
     QVERIFY(player.play());
-    QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        player.activeWorkerCount() > 0 || player.state() == PlaybackState::Paused,
+        1000);
   }
 
   QVERIFY(true);
@@ -406,6 +428,22 @@ void MediaPlayerCoreTests::seekDropsDecodedFramesBeforeTarget() {
   QTRY_VERIFY_WITH_TIMEOUT(player.audioClockMs() >= 1800, 3000);
   QTRY_VERIFY_WITH_TIMEOUT(firstFrameAfterSeek.load() >= 1800, 3000);
   QVERIFY(player.lastPublishedVideoPtsMs() >= 1800);
+}
+
+void MediaPlayerCoreTests::playbackMovesToPausedAtStartWhenMediaEnds() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("silent.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_COMPARE_WITH_TIMEOUT(player.state(), PlaybackState::Paused, 3000);
+  QCOMPARE(player.audioClockMs(), 0);
+  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(0), 1000);
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)

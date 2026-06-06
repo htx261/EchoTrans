@@ -48,4 +48,6 @@ private:
   std::size_t displayedVideoFrameCount_ = 0;
   qint64 durationMs_ = 0;
   qint64 pendingSeekPositionMs_ = -1;
+  bool currentHasAudio_ = false;
+  bool currentHasVideo_ = false;
 };

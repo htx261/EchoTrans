@@ -205,6 +205,9 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   stopButton_->setEnabled(false);
   displayedVideoFrameCount_ = 0;
   durationMs_ = info.durationMs;
+  currentHasAudio_ = info.hasAudio;
+  currentHasVideo_ = info.hasVideo;
+  pendingSeekPositionMs_ = -1;
   seekSlider_->setRange(0, static_cast<int>(durationMs_));
   seekSlider_->setValue(0);
   updateTimeLabel(0);
@@ -241,6 +244,8 @@ void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
   player_.stop();
   pendingSeekPositionMs_ = -1;
+  currentHasAudio_ = false;
+  currentHasVideo_ = false;
   pauseButton_->setEnabled(false);
   pauseButton_->setText(QStringLiteral("暂停"));
   stopButton_->setEnabled(false);
@@ -292,28 +297,36 @@ void MainWindow::updatePlaybackStatus() {
     return;
   }
 
+  QString fatalError;
+  if (!player_.lastDemuxError().isEmpty()) {
+    fatalError = QStringLiteral("解封装失败：%1").arg(player_.lastDemuxError());
+  } else if (currentHasAudio_ && !player_.lastAudioDecodeError().isEmpty()) {
+    fatalError = QStringLiteral("音频解码失败：%1").arg(player_.lastAudioDecodeError());
+  } else if (currentHasVideo_ && !player_.lastVideoDecodeError().isEmpty()) {
+    fatalError = QStringLiteral("视频解码失败：%1").arg(player_.lastVideoDecodeError());
+  }
+
+  if (!fatalError.isEmpty()) {
+    statusBar()->showMessage(fatalError);
+    if (player_.activeWorkerCount() == 0) {
+      playbackStatusTimer_->stop();
+      player_.stop();
+      pauseButton_->setEnabled(false);
+      pauseButton_->setText(QStringLiteral("暂停"));
+      stopButton_->setEnabled(false);
+      videoLabel_->setText(QStringLiteral("播放异常"));
+      statusBar()->showMessage(fatalError);
+    }
+    return;
+  }
+
   if (player_.state() == PlaybackState::Paused) {
     statusBar()->showMessage(QStringLiteral("已暂停"));
     return;
   }
 
-  if (!player_.lastDemuxError().isEmpty()) {
-    statusBar()->showMessage(QStringLiteral("解封装失败：%1").arg(player_.lastDemuxError()));
-    return;
-  }
-
-  if (!player_.lastAudioDecodeError().isEmpty()) {
-    statusBar()->showMessage(QStringLiteral("音频解码失败：%1").arg(player_.lastAudioDecodeError()));
-    return;
-  }
-
-  if (!player_.lastAudioOutputError().isEmpty()) {
+  if (currentHasAudio_ && !player_.lastAudioOutputError().isEmpty()) {
     statusBar()->showMessage(QStringLiteral("音频输出失败：%1").arg(player_.lastAudioOutputError()));
-    return;
-  }
-
-  if (!player_.lastVideoDecodeError().isEmpty()) {
-    statusBar()->showMessage(QStringLiteral("视频解码失败：%1").arg(player_.lastVideoDecodeError()));
     return;
   }
 

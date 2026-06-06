@@ -66,6 +66,7 @@ private:
   void publishVideoFramesForClock(qint64 audioClockMs, PlaybackFrame* pendingVideoFrame);
   void waitWhilePaused();
   void waitUntilStopRequested();
+  void finishWorker();
   void setLastDemuxError(const QString& message);
   void setLastAudioDecodeError(const QString& message);
   void setLastAudioOutputError(const QString& message);
