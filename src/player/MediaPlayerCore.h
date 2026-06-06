@@ -3,6 +3,7 @@
 #include "player/PlaybackState.h"
 #include "player/PlaybackQueues.h"
 
+#include <QImage>
 #include <QString>
 
 #include <atomic>
@@ -35,8 +36,11 @@ public:
   std::size_t decodedAudioFrameCount() const;
   std::size_t decodedAudioByteCount() const;
   std::size_t audioOutputByteCount() const;
+  std::size_t decodedVideoFrameCount() const;
+  bool takeVideoFrame(QImage* image);
   QString lastAudioDecodeError() const;
   QString lastAudioOutputError() const;
+  QString lastVideoDecodeError() const;
 
   bool open(const QString& filePath);
   bool play();
@@ -46,13 +50,14 @@ public:
 private:
   void startWorkersLocked();
   void demuxLoop();
-  void videoDecodePlaceholderLoop();
+  void videoDecodeLoop();
   void audioDecodeLoop();
   void audioOutputLoop();
   void waitUntilStopRequested();
   void setLastDemuxError(const QString& message);
   void setLastAudioDecodeError(const QString& message);
   void setLastAudioOutputError(const QString& message);
+  void setLastVideoDecodeError(const QString& message);
 
   mutable std::mutex mutex_;
   PlaybackState state_ = PlaybackState::Stopped;
@@ -60,6 +65,7 @@ private:
   QString lastDemuxError_;
   QString lastAudioDecodeError_;
   QString lastAudioOutputError_;
+  QString lastVideoDecodeError_;
   std::unique_ptr<PlaybackQueues> playbackQueues_;
 
   std::atomic_bool stopRequested_{false};
@@ -69,6 +75,7 @@ private:
   std::atomic_size_t decodedAudioFrameCount_{0};
   std::atomic_size_t decodedAudioByteCount_{0};
   std::atomic_size_t audioOutputByteCount_{0};
+  std::atomic_size_t decodedVideoFrameCount_{0};
   std::atomic_size_t activeWorkerCount_{0};
   std::mutex workerMutex_;
   std::condition_variable workerCondition_;

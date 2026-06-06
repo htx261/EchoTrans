@@ -7,6 +7,8 @@
 #include <QLabel>
 #include <QFont>
 #include <QHBoxLayout>
+#include <QImage>
+#include <QPixmap>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QTimer>
@@ -33,9 +35,11 @@ MainWindow::MainWindow(QWidget* parent)
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
       stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
       statusLabel_(new QLabel(this)),
+      videoLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
-      playbackStatusTimer_(new QTimer(this)) {
+      playbackStatusTimer_(new QTimer(this)),
+      videoFrameTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
   resize(1280, 720);
 
@@ -62,6 +66,11 @@ MainWindow::MainWindow(QWidget* parent)
   mediaInfoLabel_->setWordWrap(true);
   mediaInfoLabel_->setText(QStringLiteral("尚未打开媒体文件"));
 
+  videoLabel_->setAlignment(Qt::AlignCenter);
+  videoLabel_->setMinimumSize(640, 360);
+  videoLabel_->setStyleSheet(QStringLiteral("background-color: #101010; color: white;"));
+  videoLabel_->setText(QStringLiteral("尚未显示视频画面"));
+
   stopButton_->setEnabled(false);
 
   auto* buttonLayout = new QHBoxLayout();
@@ -73,10 +82,12 @@ MainWindow::MainWindow(QWidget* parent)
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
   connect(playbackStatusTimer_, &QTimer::timeout, this, &MainWindow::updatePlaybackStatus);
+  connect(videoFrameTimer_, &QTimer::timeout, this, &MainWindow::updateVideoFrame);
 
   layout->addWidget(title);
   layout->addWidget(statusLabel_);
   layout->addLayout(buttonLayout);
+  layout->addWidget(videoLabel_, 1);
   layout->addWidget(mediaInfoLabel_);
   setCentralWidget(central);
 
@@ -140,10 +151,12 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
 bool MainWindow::startPlayback(const MediaInfo& info) {
   player_.stop();
   playbackStatusTimer_->stop();
+  videoFrameTimer_->stop();
   stopButton_->setEnabled(false);
+  displayedVideoFrameCount_ = 0;
 
-  if (!info.hasAudio) {
-    statusBar()->showMessage(QStringLiteral("媒体没有音频流"));
+  if (!info.hasAudio && !info.hasVideo) {
+    statusBar()->showMessage(QStringLiteral("媒体没有可播放的音视频流"));
     return false;
   }
 
@@ -159,19 +172,31 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
 
   stopButton_->setEnabled(true);
   playbackStatusTimer_->start(300);
+  if (info.hasVideo) {
+    videoLabel_->setText(QStringLiteral("正在准备视频画面"));
+    videoFrameTimer_->start(33);
+  } else {
+    videoLabel_->setText(QStringLiteral("当前媒体没有视频画面"));
+  }
   updatePlaybackStatus();
   return true;
 }
 
 void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
+  videoFrameTimer_->stop();
   player_.stop();
   stopButton_->setEnabled(false);
+  videoLabel_->setText(QStringLiteral("播放已停止"));
   statusBar()->showMessage(QStringLiteral("播放已停止"));
 }
 
 PlaybackState MainWindow::playbackState() const {
   return player_.state();
+}
+
+std::size_t MainWindow::displayedVideoFrameCount() const {
+  return displayedVideoFrameCount_;
 }
 
 void MainWindow::updatePlaybackStatus() {
@@ -196,6 +221,21 @@ void MainWindow::updatePlaybackStatus() {
     return;
   }
 
+  if (!player_.lastVideoDecodeError().isEmpty()) {
+    statusBar()->showMessage(QStringLiteral("视频解码失败：%1").arg(player_.lastVideoDecodeError()));
+    return;
+  }
+
+  if (player_.audioOutputByteCount() > 0 && displayedVideoFrameCount_ > 0) {
+    statusBar()->showMessage(QStringLiteral("正在播放音频和视频"));
+    return;
+  }
+
+  if (displayedVideoFrameCount_ > 0) {
+    statusBar()->showMessage(QStringLiteral("正在播放视频"));
+    return;
+  }
+
   if (player_.audioOutputByteCount() > 0) {
     statusBar()->showMessage(QStringLiteral("正在播放音频"));
     return;
@@ -207,4 +247,23 @@ void MainWindow::updatePlaybackStatus() {
   }
 
   statusBar()->showMessage(QStringLiteral("正在准备音频播放"));
+}
+
+void MainWindow::updateVideoFrame() {
+  QImage image;
+  bool hasFrame = false;
+
+  while (player_.takeVideoFrame(&image)) {
+    hasFrame = true;
+  }
+
+  if (!hasFrame || image.isNull()) {
+    return;
+  }
+
+  videoLabel_->setPixmap(QPixmap::fromImage(image).scaled(
+      videoLabel_->size(),
+      Qt::KeepAspectRatio,
+      Qt::SmoothTransformation));
+  ++displayedVideoFrameCount_;
 }

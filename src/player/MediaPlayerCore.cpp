@@ -8,6 +8,7 @@
 #include <QIODevice>
 #include <QThread>
 
+#include <algorithm>
 #include <utility>
 
 extern "C" {
@@ -20,6 +21,7 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
 }
 
 namespace {
@@ -227,6 +229,39 @@ QString MediaPlayerCore::lastAudioOutputError() const {
   return lastAudioOutputError_;
 }
 
+std::size_t MediaPlayerCore::decodedVideoFrameCount() const {
+  return decodedVideoFrameCount_.load();
+}
+
+bool MediaPlayerCore::takeVideoFrame(QImage* image) {
+  if (!image) {
+    return false;
+  }
+
+  PlaybackQueues* queues = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queues = playbackQueues_.get();
+  }
+
+  if (!queues) {
+    return false;
+  }
+
+  PlaybackFrame frame;
+  if (!queues->videoFrames.tryPop(frame) || frame.endOfStream || frame.image.isNull()) {
+    return false;
+  }
+
+  *image = frame.image;
+  return true;
+}
+
+QString MediaPlayerCore::lastVideoDecodeError() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return lastVideoDecodeError_;
+}
+
 bool MediaPlayerCore::open(const QString& filePath) {
   const QString trimmedPath = filePath.trimmed();
   if (trimmedPath.isEmpty()) {
@@ -244,9 +279,11 @@ bool MediaPlayerCore::open(const QString& filePath) {
   decodedAudioFrameCount_.store(0);
   decodedAudioByteCount_.store(0);
   audioOutputByteCount_.store(0);
+  decodedVideoFrameCount_.store(0);
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
   lastAudioOutputError_.clear();
+  lastVideoDecodeError_.clear();
   state_ = PlaybackState::Opening;
   return true;
 }
@@ -318,12 +355,14 @@ void MediaPlayerCore::startWorkersLocked() {
   decodedAudioFrameCount_.store(0);
   decodedAudioByteCount_.store(0);
   audioOutputByteCount_.store(0);
+  decodedVideoFrameCount_.store(0);
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
   lastAudioOutputError_.clear();
+  lastVideoDecodeError_.clear();
 
   workerThreads_.emplace_back(&MediaPlayerCore::demuxLoop, this);
-  workerThreads_.emplace_back(&MediaPlayerCore::videoDecodePlaceholderLoop, this);
+  workerThreads_.emplace_back(&MediaPlayerCore::videoDecodeLoop, this);
   workerThreads_.emplace_back(&MediaPlayerCore::audioDecodeLoop, this);
   workerThreads_.emplace_back(&MediaPlayerCore::audioOutputLoop, this);
 }
@@ -422,23 +461,208 @@ void MediaPlayerCore::demuxLoop() {
   activeWorkerCount_.fetch_sub(1);
 }
 
-void MediaPlayerCore::videoDecodePlaceholderLoop() {
+void MediaPlayerCore::videoDecodeLoop() {
   activeWorkerCount_.fetch_add(1);
 
+  QString path;
   PlaybackQueues* queues = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    path = mediaPath_;
     queues = playbackQueues_.get();
   }
 
-  if (queues) {
+  if (!queues) {
+    setLastVideoDecodeError(QStringLiteral("视频队列未初始化"));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  AVFormatContext* formatContext = nullptr;
+  const QString absolutePath = QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
+  const QByteArray encodedPath = absolutePath.toUtf8();
+
+  int result = avformat_open_input(&formatContext, encodedPath.constData(), nullptr, nullptr);
+  if (result < 0) {
+    setLastVideoDecodeError(QStringLiteral("打开视频解码输入失败：%1").arg(ffmpegErrorToString(result)));
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  result = avformat_find_stream_info(formatContext, nullptr);
+  if (result < 0) {
+    setLastVideoDecodeError(QStringLiteral("读取视频流信息失败：%1").arg(ffmpegErrorToString(result)));
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  const int videoStreamIndex = av_find_best_stream(formatContext, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+  if (videoStreamIndex < 0) {
+    setLastVideoDecodeError(QStringLiteral("未找到视频流"));
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  AVStream* videoStream = formatContext->streams[videoStreamIndex];
+  const AVCodec* codec = avcodec_find_decoder(videoStream->codecpar->codec_id);
+  if (!codec) {
+    setLastVideoDecodeError(QStringLiteral("未找到视频解码器"));
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  AVCodecContext* codecContext = avcodec_alloc_context3(codec);
+  if (!codecContext) {
+    setLastVideoDecodeError(QStringLiteral("创建视频解码上下文失败"));
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  result = avcodec_parameters_to_context(codecContext, videoStream->codecpar);
+  if (result < 0) {
+    setLastVideoDecodeError(QStringLiteral("复制视频解码参数失败：%1").arg(ffmpegErrorToString(result)));
+    avcodec_free_context(&codecContext);
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  codecContext->time_base = videoStream->time_base;
+  result = avcodec_open2(codecContext, codec, nullptr);
+  if (result < 0) {
+    setLastVideoDecodeError(QStringLiteral("打开视频解码器失败：%1").arg(ffmpegErrorToString(result)));
+    avcodec_free_context(&codecContext);
+    avformat_close_input(&formatContext);
+    PlaybackFrame endFrame;
+    endFrame.endOfStream = true;
+    queues->videoFrames.push(std::move(endFrame));
+    waitUntilStopRequested();
+    activeWorkerCount_.fetch_sub(1);
+    return;
+  }
+
+  SwsContext* scaler = sws_getContext(
+      codecContext->width,
+      codecContext->height,
+      codecContext->pix_fmt,
+      codecContext->width,
+      codecContext->height,
+      AV_PIX_FMT_BGRA,
+      SWS_BILINEAR,
+      nullptr,
+      nullptr,
+      nullptr);
+
+  AVFrame* frame = av_frame_alloc();
+  if (!scaler || !frame) {
+    setLastVideoDecodeError(QStringLiteral("创建视频转换缓冲失败"));
+  } else {
     PlaybackPacket packet;
     while (!stopRequested_.load() && queues->videoPackets.waitPop(packet)) {
+      const int sendResult = packet.endOfStream
+          ? avcodec_send_packet(codecContext, nullptr)
+          : avcodec_send_packet(codecContext, packet.packet.get());
+
+      if (sendResult < 0 && sendResult != AVERROR_EOF) {
+        setLastVideoDecodeError(QStringLiteral("发送视频包到解码器失败：%1").arg(ffmpegErrorToString(sendResult)));
+        break;
+      }
+
+      while (true) {
+        const int receiveResult = avcodec_receive_frame(codecContext, frame);
+        if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
+          break;
+        }
+
+        if (receiveResult < 0) {
+          setLastVideoDecodeError(QStringLiteral("解码视频帧失败：%1").arg(ffmpegErrorToString(receiveResult)));
+          break;
+        }
+
+        QByteArray imageBytes(codecContext->width * codecContext->height * 4, '\0');
+        uint8_t* outputData[1] = {
+          reinterpret_cast<uint8_t*>(imageBytes.data())
+        };
+        int outputLineSize[1] = {
+          codecContext->width * 4
+        };
+
+        sws_scale(
+            scaler,
+            frame->data,
+            frame->linesize,
+            0,
+            codecContext->height,
+            outputData,
+            outputLineSize);
+
+        QImage image(
+            reinterpret_cast<const uchar*>(imageBytes.constData()),
+            codecContext->width,
+            codecContext->height,
+            outputLineSize[0],
+            QImage::Format_RGB32);
+
+        PlaybackFrame playbackFrame;
+        playbackFrame.ptsMs = frame->pts == AV_NOPTS_VALUE
+            ? packet.ptsMs
+            : av_rescale_q(frame->pts, videoStream->time_base, AVRational{1, 1000});
+        playbackFrame.image = image.copy();
+
+        if (!queues->videoFrames.push(std::move(playbackFrame))) {
+          av_frame_unref(frame);
+          break;
+        }
+
+        decodedVideoFrameCount_.fetch_add(1);
+        av_frame_unref(frame);
+      }
+
       if (packet.endOfStream) {
         break;
       }
     }
   }
+
+  av_frame_free(&frame);
+  if (scaler) {
+    sws_freeContext(scaler);
+  }
+  avcodec_free_context(&codecContext);
+  avformat_close_input(&formatContext);
+
+  PlaybackFrame endFrame;
+  endFrame.endOfStream = true;
+  queues->videoFrames.push(std::move(endFrame));
 
   waitUntilStopRequested();
   activeWorkerCount_.fetch_sub(1);
@@ -734,4 +958,9 @@ void MediaPlayerCore::setLastAudioDecodeError(const QString& message) {
 void MediaPlayerCore::setLastAudioOutputError(const QString& message) {
   std::lock_guard<std::mutex> lock(mutex_);
   lastAudioOutputError_ = message;
+}
+
+void MediaPlayerCore::setLastVideoDecodeError(const QString& message) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  lastVideoDecodeError_ = message;
 }
