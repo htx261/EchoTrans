@@ -1,9 +1,11 @@
 #include <QtTest/QtTest>
 
+#include "subtitle/SubtitleTrack.h"
 #include "ui/MainWindow.h"
 
 #include <QFile>
 #include <QCoreApplication>
+#include <QLabel>
 #include <QProcess>
 #include <QPushButton>
 #include <QSlider>
@@ -99,6 +101,7 @@ private slots:
   void seekSliderClickAndDragRequestSeek();
   void updatesControlsWhenPlaybackFinishes();
   void stopsPlaybackWhenMediaOpenFails();
+  void displaysSubtitleForCurrentPlaybackPosition();
 };
 
 void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
@@ -224,7 +227,7 @@ void MainWindowTests::updatesControlsWhenPlaybackFinishes() {
   QVERIFY(seekSlider);
 
   QTRY_COMPARE_WITH_TIMEOUT(window.playbackState(), PlaybackState::Paused, 4000);
-  QCOMPARE(window.statusBar()->currentMessage(), QStringLiteral("已暂停"));
+  QTRY_COMPARE_WITH_TIMEOUT(window.statusBar()->currentMessage(), QStringLiteral("已暂停"), 3000);
   QVERIFY(pauseButton->isEnabled());
   QCOMPARE(pauseButton->text(), QStringLiteral("继续"));
   QCOMPARE(seekSlider->value(), 0);
@@ -239,8 +242,42 @@ void MainWindowTests::stopsPlaybackWhenMediaOpenFails() {
   MainWindow window;
   QVERIFY(window.startPlayback(info));
 
+  QTRY_VERIFY_WITH_TIMEOUT(window.statusBar()->currentMessage().contains(QStringLiteral("失败")), 3000);
   QTRY_COMPARE_WITH_TIMEOUT(window.playbackState(), PlaybackState::Stopped, 3000);
-  QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("失败")));
+}
+
+void MainWindowTests::displaysSubtitleForCurrentPlaybackPosition() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 4);
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.durationMs = 4000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  SubtitleTrack track;
+  track.setSegments({
+      SubtitleSegment{0, 1000, QStringLiteral("Opening"), QStringLiteral("开场")},
+      SubtitleSegment{1000, 2500, QStringLiteral("Architecture"), QStringLiteral("架构")}
+  });
+
+  MainWindow window;
+  window.setSubtitleTrack(track);
+  QVERIFY(window.startPlayback(info));
+
+  auto* subtitleLabel = window.findChild<QLabel*>(QStringLiteral("subtitleLabel"));
+  auto* seekSlider = window.findChild<QSlider*>(QStringLiteral("seekSlider"));
+  QVERIFY(subtitleLabel);
+  QVERIFY(seekSlider);
+
+  seekSlider->setValue(1500);
+  QMetaObject::invokeMethod(seekSlider, "sliderReleased", Qt::DirectConnection);
+
+  QCOMPARE(subtitleLabel->text(), QStringLiteral("架构"));
 }
 
 QTEST_MAIN(MainWindowTests)

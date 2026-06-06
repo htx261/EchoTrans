@@ -62,6 +62,7 @@ MainWindow::MainWindow(QWidget* parent)
       stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
       statusLabel_(new QLabel(this)),
       videoLabel_(new QLabel(this)),
+      subtitleLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
       timeLabel_(new QLabel(this)),
       seekSlider_(new SeekSlider(this)),
@@ -98,6 +99,16 @@ MainWindow::MainWindow(QWidget* parent)
   videoLabel_->setStyleSheet(QStringLiteral("background-color: #101010; color: white;"));
   videoLabel_->setText(QStringLiteral("尚未显示视频画面"));
 
+  subtitleLabel_->setAlignment(Qt::AlignCenter);
+  subtitleLabel_->setWordWrap(true);
+  subtitleLabel_->setObjectName(QStringLiteral("subtitleLabel"));
+  QFont subtitleFont = subtitleLabel_->font();
+  subtitleFont.setPointSize(18);
+  subtitleFont.setBold(true);
+  subtitleLabel_->setFont(subtitleFont);
+  subtitleLabel_->setMinimumHeight(44);
+  subtitleLabel_->setStyleSheet(QStringLiteral("color: #f5f5f5; background-color: #202020;"));
+
   stopButton_->setEnabled(false);
   pauseButton_->setEnabled(false);
   pauseButton_->setObjectName(QStringLiteral("pauseButton"));
@@ -132,6 +143,7 @@ MainWindow::MainWindow(QWidget* parent)
   layout->addWidget(statusLabel_);
   layout->addLayout(buttonLayout);
   layout->addWidget(videoLabel_, 1);
+  layout->addWidget(subtitleLabel_);
   layout->addLayout(seekLayout);
   layout->addWidget(mediaInfoLabel_);
   setCentralWidget(central);
@@ -211,6 +223,7 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   seekSlider_->setRange(0, static_cast<int>(durationMs_));
   seekSlider_->setValue(0);
   updateTimeLabel(0);
+  updateSubtitle(0);
 
   if (!info.hasAudio && !info.hasVideo) {
     statusBar()->showMessage(QStringLiteral("媒体没有可播放的音视频流"));
@@ -251,6 +264,7 @@ void MainWindow::stopPlayback() {
   stopButton_->setEnabled(false);
   seekSlider_->setValue(0);
   updateTimeLabel(0);
+  updateSubtitle(0);
   videoLabel_->setText(QStringLiteral("播放已停止"));
   statusBar()->showMessage(QStringLiteral("播放已停止"));
 }
@@ -267,36 +281,12 @@ bool MainWindow::seekInProgress() const {
   return player_.seekInProgress();
 }
 
+void MainWindow::setSubtitleTrack(const SubtitleTrack& track) {
+  subtitleTrack_ = track;
+  updateSubtitle(player_.audioClockMs());
+}
+
 void MainWindow::updatePlaybackStatus() {
-  if (player_.state() == PlaybackState::Stopped) {
-    playbackStatusTimer_->stop();
-    pauseButton_->setEnabled(false);
-    stopButton_->setEnabled(false);
-    return;
-  }
-
-  const bool isSeeking = player_.seekInProgress();
-  if (!isSeeking) {
-    pendingSeekPositionMs_ = -1;
-  }
-
-  const qint64 positionMs = isSeeking && pendingSeekPositionMs_ >= 0
-      ? pendingSeekPositionMs_
-      : player_.audioClockMs();
-  if (!seekSlider_->isSliderDown() && durationMs_ > 0) {
-    seekSlider_->setValue(static_cast<int>(std::min(positionMs, durationMs_)));
-  }
-  updateTimeLabel(positionMs);
-
-  pauseButton_->setText(player_.state() == PlaybackState::Paused
-      ? QStringLiteral("继续")
-      : QStringLiteral("暂停"));
-
-  if (isSeeking) {
-    statusBar()->showMessage(QStringLiteral("正在跳转..."));
-    return;
-  }
-
   QString fatalError;
   if (!player_.lastDemuxError().isEmpty()) {
     fatalError = QStringLiteral("解封装失败：%1").arg(player_.lastDemuxError());
@@ -317,6 +307,39 @@ void MainWindow::updatePlaybackStatus() {
       videoLabel_->setText(QStringLiteral("播放异常"));
       statusBar()->showMessage(fatalError);
     }
+    return;
+  }
+
+  if (player_.state() == PlaybackState::Stopped) {
+    playbackStatusTimer_->stop();
+    pauseButton_->setEnabled(false);
+    stopButton_->setEnabled(false);
+    return;
+  }
+
+  const bool isSeeking = player_.seekInProgress();
+  if (!isSeeking) {
+    pendingSeekPositionMs_ = -1;
+  }
+
+  qint64 positionMs = isSeeking && pendingSeekPositionMs_ >= 0
+      ? pendingSeekPositionMs_
+      : player_.audioClockMs();
+  if (player_.state() == PlaybackState::Paused && player_.activeWorkerCount() == 0) {
+    positionMs = 0;
+  }
+  if (!seekSlider_->isSliderDown() && durationMs_ > 0) {
+    seekSlider_->setValue(static_cast<int>(std::min(positionMs, durationMs_)));
+  }
+  updateTimeLabel(positionMs);
+  updateSubtitle(positionMs);
+
+  pauseButton_->setText(player_.state() == PlaybackState::Paused
+      ? QStringLiteral("继续")
+      : QStringLiteral("暂停"));
+
+  if (isSeeking) {
+    statusBar()->showMessage(QStringLiteral("正在跳转..."));
     return;
   }
 
@@ -381,6 +404,7 @@ void MainWindow::seekToSliderValue() {
   }
 
   pendingSeekPositionMs_ = seekSlider_->value();
+  updateSubtitle(pendingSeekPositionMs_);
   if (!player_.seekTo(pendingSeekPositionMs_) && !player_.seekInProgress()) {
     pendingSeekPositionMs_ = -1;
   }
@@ -394,4 +418,12 @@ void MainWindow::updateTimeLabel(qint64 positionMs) {
   timeLabel_->setText(QStringLiteral("%1 / %2")
       .arg(formatDuration(boundedPosition))
       .arg(formatDuration(durationMs_)));
+}
+
+void MainWindow::updateSubtitle(qint64 positionMs) {
+  if (!subtitleLabel_) {
+    return;
+  }
+
+  subtitleLabel_->setText(subtitleTrack_.textAt(positionMs));
 }

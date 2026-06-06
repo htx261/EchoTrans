@@ -28,6 +28,7 @@ set(ECHOTRANS_FFMPEG_LIBRARIES
 
 add_library(EchoTransCore
   src/core/DependencyReport.cpp
+  src/subtitle/SubtitleTrack.cpp
 )
 
 target_include_directories(EchoTransCore
@@ -149,6 +150,21 @@ target_link_libraries(BlockingQueueTests
     Qt5::Test
 )
 
+add_executable(SubtitleTrackTests
+  tests/subtitle/SubtitleTrackTests.cpp
+)
+
+target_include_directories(SubtitleTrackTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(SubtitleTrackTests
+  PRIVATE
+    EchoTransCore
+    Qt5::Test
+)
+
 add_executable(MediaPlayerCoreTests
   tests/player/MediaPlayerCoreTests.cpp
 )
@@ -207,6 +223,7 @@ enable_testing()
 add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
 add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
 add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
+add_test(NAME SubtitleTrackTests COMMAND SubtitleTrackTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
 add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)

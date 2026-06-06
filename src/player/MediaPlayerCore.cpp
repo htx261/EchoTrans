@@ -1206,11 +1206,15 @@ void MediaPlayerCore::finishWorker() {
     if (state_ == PlaybackState::Opening
         || state_ == PlaybackState::Playing
         || state_ == PlaybackState::Paused) {
-      startPositionMs_.store(0);
-      resetPlaybackCounters(0);
-      paused_.store(true);
-      pauseAcknowledged_.store(false);
-      state_ = PlaybackState::Paused;
+      if (!lastDemuxError_.isEmpty()) {
+        state_ = PlaybackState::Stopped;
+      } else {
+        startPositionMs_.store(0);
+        resetPlaybackCounters(0);
+        paused_.store(true);
+        pauseAcknowledged_.store(false);
+        state_ = PlaybackState::Paused;
+      }
     }
   }
 
