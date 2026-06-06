@@ -11,6 +11,9 @@ private slots:
   void playRequiresOpenedMedia();
   void pausesOnlyWhilePlaying();
   void stopIsRepeatable();
+  void playStartsWorkerThreads();
+  void stopStopsWorkerThreadsAndClosesQueues();
+  void destructorStopsWorkerThreads();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -64,6 +67,44 @@ void MediaPlayerCoreTests::stopIsRepeatable() {
 
   player.stop();
   QCOMPARE(player.state(), PlaybackState::Stopped);
+}
+
+void MediaPlayerCoreTests::playStartsWorkerThreads() {
+  MediaPlayerCore player;
+
+  QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+  QVERIFY(player.play());
+
+  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
+  QVERIFY(!player.playbackQueuesClosed());
+}
+
+void MediaPlayerCoreTests::stopStopsWorkerThreadsAndClosesQueues() {
+  MediaPlayerCore player;
+
+  QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+  QVERIFY(player.play());
+  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
+
+  player.stop();
+
+  QCOMPARE(player.state(), PlaybackState::Stopped);
+  QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(0), 1000);
+  QVERIFY(player.playbackQueuesClosed());
+
+  player.stop();
+  QCOMPARE(player.activeWorkerCount(), static_cast<std::size_t>(0));
+}
+
+void MediaPlayerCoreTests::destructorStopsWorkerThreads() {
+  {
+    MediaPlayerCore player;
+    QVERIFY(player.open(QStringLiteral("D:/media/sample.mp4")));
+    QVERIFY(player.play());
+    QTRY_COMPARE_WITH_TIMEOUT(player.activeWorkerCount(), static_cast<std::size_t>(4), 1000);
+  }
+
+  QVERIFY(true);
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)
