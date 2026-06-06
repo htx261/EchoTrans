@@ -11,6 +11,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
 extern "C" {
@@ -63,6 +64,29 @@ QAudioFormat outputAudioFormat() {
   format.setByteOrder(QAudioFormat::LittleEndian);
   format.setSampleType(QAudioFormat::SignedInt);
   return format;
+}
+
+TranscriptionAudioFrame transcriptionFrameFromPlaybackFrame(const PlaybackFrame& playbackFrame) {
+  TranscriptionAudioFrame transcriptionFrame;
+  transcriptionFrame.ptsMs = playbackFrame.ptsMs;
+  transcriptionFrame.sampleRate = playbackFrame.sampleRate;
+  transcriptionFrame.channelCount = playbackFrame.channelCount;
+
+  if (playbackFrame.bytesPerSample != OutputBytesPerSample || playbackFrame.pcmData.isEmpty()) {
+    return transcriptionFrame;
+  }
+
+  const int sampleCount = playbackFrame.pcmData.size() / OutputBytesPerSample;
+  transcriptionFrame.samples.resize(sampleCount);
+
+  const char* pcm = playbackFrame.pcmData.constData();
+  for (int i = 0; i < sampleCount; ++i) {
+    qint16 sample = 0;
+    std::memcpy(&sample, pcm + i * OutputBytesPerSample, sizeof(sample));
+    transcriptionFrame.samples[i] = static_cast<float>(sample) / 32768.0f;
+  }
+
+  return transcriptionFrame;
 }
 
 bool receiveDecodedAudioFrames(
@@ -146,6 +170,11 @@ bool receiveDecodedAudioFrames(
     }
 
     playbackFrame.pcmData.resize(outputBufferSize);
+    TranscriptionAudioFrame transcriptionFrame = transcriptionFrameFromPlaybackFrame(playbackFrame);
+    if (!transcriptionFrame.samples.isEmpty()) {
+      queues->transcriptionAudioFrames.push(std::move(transcriptionFrame));
+    }
+
     if (!queues->audioFrames.push(std::move(playbackFrame))) {
       return false;
     }
@@ -282,6 +311,19 @@ bool MediaPlayerCore::takeVideoFrame(QImage* image) {
 
   *image = frame.image;
   return true;
+}
+
+bool MediaPlayerCore::takeTranscriptionAudioFrame(TranscriptionAudioFrame* frame) {
+  if (!frame) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!playbackQueues_) {
+    return false;
+  }
+
+  return playbackQueues_->transcriptionAudioFrames.tryPop(*frame);
 }
 
 void MediaPlayerCore::setVideoFrameCallback(std::function<void(const QImage&, qint64)> callback) {
@@ -1008,6 +1050,10 @@ void MediaPlayerCore::audioDecodeLoop() {
   PlaybackFrame endFrame;
   endFrame.endOfStream = true;
   queues->audioFrames.push(std::move(endFrame));
+
+  TranscriptionAudioFrame transcriptionEndFrame;
+  transcriptionEndFrame.endOfStream = true;
+  queues->transcriptionAudioFrames.push(std::move(transcriptionEndFrame));
 
   finishWorker();
 }

@@ -103,6 +103,7 @@ private slots:
   void demuxThreadQueuesAudioPackets();
   void demuxThreadReportsOpenFailure();
   void audioDecodeThreadProducesPcmFrames();
+  void audioDecodeThreadQueuesTranscriptionAudioFrames();
   void audioOutputThreadConsumesFramesOrReportsDeviceError();
   void videoDecodeThreadProducesImages();
   void publishesVideoFramesFromAudioClock();
@@ -268,6 +269,25 @@ void MediaPlayerCoreTests::audioDecodeThreadProducesPcmFrames() {
   QTRY_VERIFY_WITH_TIMEOUT(player.decodedAudioFrameCount() > 0, 1500);
   QVERIFY2(player.lastAudioDecodeError().isEmpty(), qPrintable(player.lastAudioDecodeError()));
   QVERIFY(player.decodedAudioByteCount() > 0);
+}
+
+void MediaPlayerCoreTests::audioDecodeThreadQueuesTranscriptionAudioFrames() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("silent.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  TranscriptionAudioFrame frame;
+  QTRY_VERIFY_WITH_TIMEOUT(player.takeTranscriptionAudioFrame(&frame), 1500);
+  QVERIFY(!frame.samples.isEmpty());
+  QCOMPARE(frame.sampleRate, 48000);
+  QCOMPARE(frame.channelCount, 2);
+  QVERIFY(frame.ptsMs >= 0);
 }
 
 void MediaPlayerCoreTests::audioOutputThreadConsumesFramesOrReportsDeviceError() {

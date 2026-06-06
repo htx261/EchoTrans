@@ -41,6 +41,7 @@ public:
   std::size_t decodedVideoFrameCount() const;
   qint64 lastPublishedVideoPtsMs() const;
   bool takeVideoFrame(QImage* image);
+  bool takeTranscriptionAudioFrame(TranscriptionAudioFrame* frame);
   void setVideoFrameCallback(std::function<void(const QImage&, qint64)> callback);
   QString lastAudioDecodeError() const;
   QString lastAudioOutputError() const;

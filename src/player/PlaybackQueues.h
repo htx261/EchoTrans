@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <QImage>
+#include <QVector>
 #include <QtGlobal>
 
 #include <memory>
@@ -34,6 +35,14 @@ struct PlaybackFrame {
   bool endOfStream = false;
 };
 
+struct TranscriptionAudioFrame {
+  qint64 ptsMs = 0;
+  int sampleRate = 0;
+  int channelCount = 0;
+  QVector<float> samples;
+  bool endOfStream = false;
+};
+
 class PlaybackQueues {
 public:
   static constexpr std::size_t VideoPacketQueueCapacity = 128;
@@ -45,7 +54,8 @@ public:
       : videoPackets(VideoPacketQueueCapacity),
         audioPackets(AudioPacketQueueCapacity),
         videoFrames(VideoFrameQueueCapacity),
-        audioFrames(AudioFrameQueueCapacity) {
+        audioFrames(AudioFrameQueueCapacity),
+        transcriptionAudioFrames(0) {
   }
 
   void closeAll() {
@@ -53,6 +63,7 @@ public:
     audioPackets.close();
     videoFrames.close();
     audioFrames.close();
+    transcriptionAudioFrames.close();
   }
 
   void clearAll() {
@@ -60,17 +71,20 @@ public:
     audioPackets.clear();
     videoFrames.clear();
     audioFrames.clear();
+    transcriptionAudioFrames.clear();
   }
 
   bool isClosed() const {
     return videoPackets.isClosed()
         && audioPackets.isClosed()
         && videoFrames.isClosed()
-        && audioFrames.isClosed();
+        && audioFrames.isClosed()
+        && transcriptionAudioFrames.isClosed();
   }
 
   BlockingQueue<PlaybackPacket> videoPackets;
   BlockingQueue<PlaybackPacket> audioPackets;
   BlockingQueue<PlaybackFrame> videoFrames;
   BlockingQueue<PlaybackFrame> audioFrames;
+  BlockingQueue<TranscriptionAudioFrame> transcriptionAudioFrames;
 };
