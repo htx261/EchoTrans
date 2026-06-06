@@ -18,6 +18,14 @@ include(cmake/EchoTransDependencies.cmake)
 
 find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test Multimedia)
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+set(WHISPER_BUILD_TESTS OFF CACHE BOOL "Build whisper.cpp tests" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "Build whisper.cpp examples" FORCE)
+set(WHISPER_BUILD_SERVER OFF CACHE BOOL "Build whisper.cpp server" FORCE)
+set(WHISPER_CURL OFF CACHE BOOL "Use curl in whisper.cpp" FORCE)
+set(WHISPER_SDL2 OFF CACHE BOOL "Use SDL2 in whisper.cpp" FORCE)
+add_subdirectory("${ECHOTRANS_WHISPER_ROOT}" "${CMAKE_BINARY_DIR}/whisper.cpp" EXCLUDE_FROM_ALL)
+
 set(ECHOTRANS_FFMPEG_LIBRARIES
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avformat.lib"
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avcodec.lib"
@@ -29,6 +37,7 @@ set(ECHOTRANS_FFMPEG_LIBRARIES
 add_library(EchoTransCore
   src/core/DependencyReport.cpp
   src/subtitle/SubtitleTrack.cpp
+  src/transcription/WhisperTranscriber.cpp
 )
 
 target_include_directories(EchoTransCore
@@ -47,6 +56,8 @@ target_compile_definitions(EchoTransCore
 target_link_libraries(EchoTransCore
   PUBLIC
     Qt5::Core
+  PRIVATE
+    whisper
 )
 
 add_library(EchoTransMedia
@@ -165,6 +176,21 @@ target_link_libraries(SubtitleTrackTests
     Qt5::Test
 )
 
+add_executable(WhisperTranscriberTests
+  tests/transcription/WhisperTranscriberTests.cpp
+)
+
+target_include_directories(WhisperTranscriberTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(WhisperTranscriberTests
+  PRIVATE
+    EchoTransCore
+    Qt5::Test
+)
+
 add_executable(MediaPlayerCoreTests
   tests/player/MediaPlayerCoreTests.cpp
 )
@@ -224,6 +250,7 @@ add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
 add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
 add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
 add_test(NAME SubtitleTrackTests COMMAND SubtitleTrackTests)
+add_test(NAME WhisperTranscriberTests COMMAND WhisperTranscriberTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
 add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)
