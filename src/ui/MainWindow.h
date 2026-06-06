@@ -2,6 +2,7 @@
 
 #include "media/MediaInfo.h"
 #include "player/MediaPlayerCore.h"
+#include "subtitle/SubtitleTrack.h"
 
 #include <QFutureWatcher>
 #include <QMainWindow>
@@ -23,6 +24,7 @@ public:
   PlaybackState playbackState() const;
   std::size_t displayedVideoFrameCount() const;
   bool seekInProgress() const;
+  void setSubtitleTrack(const SubtitleTrack& track);
 
 private:
   void openMediaFile();
@@ -33,12 +35,14 @@ private:
   void togglePauseResume();
   void seekToSliderValue();
   void updateTimeLabel(qint64 positionMs);
+  void updateSubtitle(qint64 positionMs);
 
   QPushButton* openButton_ = nullptr;
   QPushButton* pauseButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
   QLabel* statusLabel_ = nullptr;
   QLabel* videoLabel_ = nullptr;
+  QLabel* subtitleLabel_ = nullptr;
   QLabel* mediaInfoLabel_ = nullptr;
   QLabel* timeLabel_ = nullptr;
   QSlider* seekSlider_ = nullptr;
@@ -50,4 +54,5 @@ private:
   qint64 pendingSeekPositionMs_ = -1;
   bool currentHasAudio_ = false;
   bool currentHasVideo_ = false;
+  SubtitleTrack subtitleTrack_;
 };
