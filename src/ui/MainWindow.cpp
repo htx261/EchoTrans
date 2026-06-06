@@ -6,8 +6,10 @@
 #include <QFileDialog>
 #include <QLabel>
 #include <QFont>
+#include <QHBoxLayout>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -29,9 +31,11 @@ QString formatDuration(qint64 durationMs) {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
+      stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
       statusLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
-      mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)) {
+      mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
+      playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
   resize(1280, 720);
 
@@ -58,13 +62,21 @@ MainWindow::MainWindow(QWidget* parent)
   mediaInfoLabel_->setWordWrap(true);
   mediaInfoLabel_->setText(QStringLiteral("尚未打开媒体文件"));
 
+  stopButton_->setEnabled(false);
+
+  auto* buttonLayout = new QHBoxLayout();
+  buttonLayout->addWidget(openButton_);
+  buttonLayout->addWidget(stopButton_);
+
   connect(openButton_, &QPushButton::clicked, this, &MainWindow::openMediaFile);
+  connect(stopButton_, &QPushButton::clicked, this, &MainWindow::stopPlayback);
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
+  connect(playbackStatusTimer_, &QTimer::timeout, this, &MainWindow::updatePlaybackStatus);
 
   layout->addWidget(title);
   layout->addWidget(statusLabel_);
-  layout->addWidget(openButton_);
+  layout->addLayout(buttonLayout);
   layout->addWidget(mediaInfoLabel_);
   setCentralWidget(central);
 
@@ -84,6 +96,7 @@ void MainWindow::openMediaFile() {
     return;
   }
 
+  stopPlayback();
   openButton_->setEnabled(false);
   mediaInfoLabel_->setText(QStringLiteral("正在读取媒体信息..."));
   statusBar()->showMessage(QStringLiteral("正在打开媒体文件"));
@@ -121,4 +134,77 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
           : QStringLiteral("无")));
 
   statusBar()->showMessage(QStringLiteral("媒体信息读取完成"));
+  startPlayback(info);
+}
+
+bool MainWindow::startPlayback(const MediaInfo& info) {
+  player_.stop();
+  playbackStatusTimer_->stop();
+  stopButton_->setEnabled(false);
+
+  if (!info.hasAudio) {
+    statusBar()->showMessage(QStringLiteral("媒体没有音频流"));
+    return false;
+  }
+
+  if (!player_.open(info.filePath)) {
+    statusBar()->showMessage(QStringLiteral("播放器打开失败"));
+    return false;
+  }
+
+  if (!player_.play()) {
+    statusBar()->showMessage(QStringLiteral("播放器启动失败"));
+    return false;
+  }
+
+  stopButton_->setEnabled(true);
+  playbackStatusTimer_->start(300);
+  updatePlaybackStatus();
+  return true;
+}
+
+void MainWindow::stopPlayback() {
+  playbackStatusTimer_->stop();
+  player_.stop();
+  stopButton_->setEnabled(false);
+  statusBar()->showMessage(QStringLiteral("播放已停止"));
+}
+
+PlaybackState MainWindow::playbackState() const {
+  return player_.state();
+}
+
+void MainWindow::updatePlaybackStatus() {
+  if (player_.state() == PlaybackState::Stopped) {
+    playbackStatusTimer_->stop();
+    stopButton_->setEnabled(false);
+    return;
+  }
+
+  if (!player_.lastDemuxError().isEmpty()) {
+    statusBar()->showMessage(QStringLiteral("解封装失败：%1").arg(player_.lastDemuxError()));
+    return;
+  }
+
+  if (!player_.lastAudioDecodeError().isEmpty()) {
+    statusBar()->showMessage(QStringLiteral("音频解码失败：%1").arg(player_.lastAudioDecodeError()));
+    return;
+  }
+
+  if (!player_.lastAudioOutputError().isEmpty()) {
+    statusBar()->showMessage(QStringLiteral("音频输出失败：%1").arg(player_.lastAudioOutputError()));
+    return;
+  }
+
+  if (player_.audioOutputByteCount() > 0) {
+    statusBar()->showMessage(QStringLiteral("正在播放音频"));
+    return;
+  }
+
+  if (player_.decodedAudioFrameCount() > 0) {
+    statusBar()->showMessage(QStringLiteral("音频已解码，等待输出"));
+    return;
+  }
+
+  statusBar()->showMessage(QStringLiteral("正在准备音频播放"));
 }

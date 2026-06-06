@@ -2,6 +2,7 @@
 
 #include "player/BlockingQueue.h"
 
+#include <QByteArray>
 #include <QtGlobal>
 
 #include <memory>
@@ -24,6 +25,10 @@ struct PlaybackPacket {
 
 struct PlaybackFrame {
   qint64 ptsMs = 0;
+  QByteArray pcmData;
+  int sampleRate = 0;
+  int channelCount = 0;
+  int bytesPerSample = 0;
   bool endOfStream = false;
 };
 

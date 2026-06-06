@@ -16,12 +16,13 @@ set(CMAKE_AUTOUIC ON)
 
 include(cmake/EchoTransDependencies.cmake)
 
-find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test)
+find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test Multimedia)
 
 set(ECHOTRANS_FFMPEG_LIBRARIES
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avformat.lib"
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avcodec.lib"
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avutil.lib"
+  "${ECHOTRANS_FFMPEG_LIB_DIR}/swresample.lib"
 )
 
 add_library(EchoTransCore
@@ -77,6 +78,7 @@ target_include_directories(EchoTransPlayer
 target_link_libraries(EchoTransPlayer
   PUBLIC
     Qt5::Core
+    Qt5::Multimedia
   PRIVATE
     ${ECHOTRANS_FFMPEG_LIBRARIES}
 )
@@ -98,6 +100,7 @@ target_link_libraries(EchoTrans
   PRIVATE
     EchoTransCore
     EchoTransMedia
+    EchoTransPlayer
     Qt5::Concurrent
     Qt5::Widgets
 )
@@ -162,8 +165,31 @@ target_link_libraries(MediaPlayerCoreTests
 
 echotrans_copy_ffmpeg_runtime(MediaPlayerCoreTests)
 
+add_executable(MainWindowTests
+  tests/ui/MainWindowTests.cpp
+  src/ui/MainWindow.cpp
+)
+
+target_include_directories(MainWindowTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(MainWindowTests
+  PRIVATE
+    EchoTransCore
+    EchoTransMedia
+    EchoTransPlayer
+    Qt5::Concurrent
+    Qt5::Test
+    Qt5::Widgets
+)
+
+echotrans_copy_ffmpeg_runtime(MainWindowTests)
+
 enable_testing()
 add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
 add_test(NAME FFmpegMediaProbeTests COMMAND FFmpegMediaProbeTests)
 add_test(NAME BlockingQueueTests COMMAND BlockingQueueTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
+add_test(NAME MainWindowTests COMMAND MainWindowTests)
