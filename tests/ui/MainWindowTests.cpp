@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSlider>
+#include <QStatusBar>
 #include <QTemporaryDir>
 
 #include <cstring>
@@ -96,6 +97,8 @@ private slots:
   void displaysVideoFramesFromPlayback();
   void pauseButtonTogglesPauseAndResume();
   void seekSliderClickAndDragRequestSeek();
+  void updatesControlsWhenPlaybackFinishes();
+  void stopsPlaybackWhenMediaOpenFails();
 };
 
 void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
@@ -197,6 +200,47 @@ void MainWindowTests::seekSliderClickAndDragRequestSeek() {
   QMetaObject::invokeMethod(seekSlider, "sliderReleased", Qt::DirectConnection);
 
   QTRY_VERIFY_WITH_TIMEOUT(window.seekInProgress(), 1000);
+}
+
+void MainWindowTests::updatesControlsWhenPlaybackFinishes() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")));
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.durationMs = 1000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  MainWindow window;
+  QVERIFY(window.startPlayback(info));
+
+  auto* pauseButton = window.findChild<QPushButton*>(QStringLiteral("pauseButton"));
+  auto* seekSlider = window.findChild<QSlider*>(QStringLiteral("seekSlider"));
+  QVERIFY(pauseButton);
+  QVERIFY(seekSlider);
+
+  QTRY_COMPARE_WITH_TIMEOUT(window.playbackState(), PlaybackState::Paused, 4000);
+  QCOMPARE(window.statusBar()->currentMessage(), QStringLiteral("已暂停"));
+  QVERIFY(pauseButton->isEnabled());
+  QCOMPARE(pauseButton->text(), QStringLiteral("继续"));
+  QCOMPARE(seekSlider->value(), 0);
+}
+
+void MainWindowTests::stopsPlaybackWhenMediaOpenFails() {
+  MediaInfo info;
+  info.filePath = QStringLiteral("Z:/missing/media.wav");
+  info.durationMs = 1000;
+  info.hasAudio = true;
+
+  MainWindow window;
+  QVERIFY(window.startPlayback(info));
+
+  QTRY_COMPARE_WITH_TIMEOUT(window.playbackState(), PlaybackState::Stopped, 3000);
+  QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("失败")));
 }
 
 QTEST_MAIN(MainWindowTests)

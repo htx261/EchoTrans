@@ -6,6 +6,7 @@
 #include <QAudioDeviceInfo>
 #include <QAudioFormat>
 #include <QAudioOutput>
+#include <QElapsedTimer>
 #include <QIODevice>
 #include <QThread>
 
@@ -358,6 +359,16 @@ bool MediaPlayerCore::resume() {
 
     paused_.store(false);
     pauseAcknowledged_.store(false);
+    if (activeWorkerCount_.load() == 0) {
+      for (std::thread& worker : workerThreads_) {
+        if (worker.joinable()) {
+          worker.join();
+        }
+      }
+      workerThreads_.clear();
+      playbackQueues_ = std::make_unique<PlaybackQueues>();
+      startWorkersLocked();
+    }
     state_ = PlaybackState::Playing;
   }
 
@@ -521,8 +532,7 @@ void MediaPlayerCore::demuxLoop() {
   if (result < 0) {
     setLastDemuxError(QStringLiteral("打开媒体文件失败：%1").arg(ffmpegErrorToString(result)));
     demuxFinished_.store(true);
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -531,8 +541,7 @@ void MediaPlayerCore::demuxLoop() {
     setLastDemuxError(QStringLiteral("读取媒体流信息失败：%1").arg(ffmpegErrorToString(result)));
     avformat_close_input(&formatContext);
     demuxFinished_.store(true);
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -601,8 +610,7 @@ void MediaPlayerCore::demuxLoop() {
     queues->videoPackets.push(std::move(videoEnd));
   }
   demuxFinished_.store(true);
-  waitUntilStopRequested();
-  activeWorkerCount_.fetch_sub(1);
+  finishWorker();
 }
 
 void MediaPlayerCore::videoDecodeLoop() {
@@ -618,8 +626,7 @@ void MediaPlayerCore::videoDecodeLoop() {
 
   if (!queues) {
     setLastVideoDecodeError(QStringLiteral("视频队列未初始化"));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -633,8 +640,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -645,8 +651,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -657,8 +662,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -671,8 +675,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -683,8 +686,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -696,8 +698,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -710,8 +711,7 @@ void MediaPlayerCore::videoDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->videoFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -820,8 +820,7 @@ void MediaPlayerCore::videoDecodeLoop() {
   endFrame.endOfStream = true;
   queues->videoFrames.push(std::move(endFrame));
 
-  waitUntilStopRequested();
-  activeWorkerCount_.fetch_sub(1);
+  finishWorker();
 }
 
 void MediaPlayerCore::audioDecodeLoop() {
@@ -837,8 +836,7 @@ void MediaPlayerCore::audioDecodeLoop() {
 
   if (!queues) {
     setLastAudioDecodeError(QStringLiteral("音频队列未初始化"));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -852,8 +850,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -864,8 +861,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -876,8 +872,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -889,8 +884,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -901,8 +895,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -914,8 +907,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -928,8 +920,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -961,8 +952,7 @@ void MediaPlayerCore::audioDecodeLoop() {
     PlaybackFrame endFrame;
     endFrame.endOfStream = true;
     queues->audioFrames.push(std::move(endFrame));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -1019,8 +1009,7 @@ void MediaPlayerCore::audioDecodeLoop() {
   endFrame.endOfStream = true;
   queues->audioFrames.push(std::move(endFrame));
 
-  waitUntilStopRequested();
-  activeWorkerCount_.fetch_sub(1);
+  finishWorker();
 }
 
 void MediaPlayerCore::audioOutputLoop() {
@@ -1034,8 +1023,7 @@ void MediaPlayerCore::audioOutputLoop() {
 
   if (!queues) {
     setLastAudioOutputError(QStringLiteral("音频帧队列未初始化"));
-    waitUntilStopRequested();
-    activeWorkerCount_.fetch_sub(1);
+    finishWorker();
     return;
   }
 
@@ -1127,12 +1115,20 @@ void MediaPlayerCore::audioOutputLoop() {
     }
   }
 
+  QElapsedTimer drainTimer;
+  drainTimer.start();
   while (audioOutput
       && hasAudioClockBase
       && !stopRequested_.load()
-      && audioClockMs_.load() < lastAudioFrameEndMs) {
+      && audioClockMs_.load() < lastAudioFrameEndMs
+      && drainTimer.elapsed() < 1000) {
     updateOutputClock();
     QThread::msleep(10);
+  }
+
+  if (hasAudioClockBase && !stopRequested_.load()) {
+    audioClockMs_.store(lastAudioFrameEndMs);
+    publishVideoFramesForClock(lastAudioFrameEndMs, &pendingVideoFrame);
   }
 
   if (audioOutput) {
@@ -1140,8 +1136,7 @@ void MediaPlayerCore::audioOutputLoop() {
     delete audioOutput;
   }
 
-  waitUntilStopRequested();
-  activeWorkerCount_.fetch_sub(1);
+  finishWorker();
 }
 
 void MediaPlayerCore::publishVideoFramesForClock(qint64 audioClockMs, PlaybackFrame* pendingVideoFrame) {
@@ -1202,6 +1197,24 @@ void MediaPlayerCore::waitUntilStopRequested() {
   workerCondition_.wait(lock, [this]() {
     return stopRequested_.load();
   });
+}
+
+void MediaPlayerCore::finishWorker() {
+  const std::size_t previousCount = activeWorkerCount_.fetch_sub(1);
+  if (previousCount <= 1 && !stopRequested_.load()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_ == PlaybackState::Opening
+        || state_ == PlaybackState::Playing
+        || state_ == PlaybackState::Paused) {
+      startPositionMs_.store(0);
+      resetPlaybackCounters(0);
+      paused_.store(true);
+      pauseAcknowledged_.store(false);
+      state_ = PlaybackState::Paused;
+    }
+  }
+
+  workerCondition_.notify_all();
 }
 
 void MediaPlayerCore::waitWhilePaused() {
