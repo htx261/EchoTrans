@@ -8,6 +8,7 @@
 
 class QLabel;
 class QPushButton;
+class QSlider;
 class QTimer;
 
 class MainWindow : public QMainWindow {
@@ -21,6 +22,7 @@ public:
   void stopPlayback();
   PlaybackState playbackState() const;
   std::size_t displayedVideoFrameCount() const;
+  bool seekInProgress() const;
 
 private:
   void openMediaFile();
@@ -28,14 +30,21 @@ private:
   void showMediaInfo(const MediaProbeResult& result);
   void updatePlaybackStatus();
   void displayVideoFrame(const QImage& image);
+  void togglePauseResume();
+  void seekToSliderValue();
+  void updateTimeLabel(qint64 positionMs);
 
   QPushButton* openButton_ = nullptr;
+  QPushButton* pauseButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
   QLabel* statusLabel_ = nullptr;
   QLabel* videoLabel_ = nullptr;
   QLabel* mediaInfoLabel_ = nullptr;
+  QLabel* timeLabel_ = nullptr;
+  QSlider* seekSlider_ = nullptr;
   QFutureWatcher<MediaProbeResult>* mediaProbeWatcher_ = nullptr;
   QTimer* playbackStatusTimer_ = nullptr;
   MediaPlayerCore player_;
   std::size_t displayedVideoFrameCount_ = 0;
+  qint64 durationMs_ = 0;
 };

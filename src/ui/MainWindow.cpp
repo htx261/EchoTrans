@@ -8,16 +8,40 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QMouseEvent>
 #include <QMetaObject>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSlider>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QVBoxLayout>
 #include <QWidget>
 
 namespace {
+class SeekSlider : public QSlider {
+public:
+  explicit SeekSlider(QWidget* parent = nullptr)
+      : QSlider(Qt::Horizontal, parent) {
+  }
+
+protected:
+  void mousePressEvent(QMouseEvent* event) override {
+    if (event->button() == Qt::LeftButton && maximum() > minimum()) {
+      const int value = QStyle::sliderValueFromPosition(
+          minimum(),
+          maximum(),
+          event->pos().x(),
+          width());
+      setValue(value);
+    }
+
+    QSlider::mousePressEvent(event);
+  }
+};
+
 QString formatDuration(qint64 durationMs) {
   const qint64 totalSeconds = durationMs / 1000;
   const qint64 hours = totalSeconds / 3600;
@@ -34,10 +58,13 @@ QString formatDuration(qint64 durationMs) {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
+      pauseButton_(new QPushButton(QStringLiteral("暂停"), this)),
       stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
       statusLabel_(new QLabel(this)),
       videoLabel_(new QLabel(this)),
       mediaInfoLabel_(new QLabel(this)),
+      timeLabel_(new QLabel(this)),
+      seekSlider_(new SeekSlider(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
       playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
@@ -72,13 +99,25 @@ MainWindow::MainWindow(QWidget* parent)
   videoLabel_->setText(QStringLiteral("尚未显示视频画面"));
 
   stopButton_->setEnabled(false);
+  pauseButton_->setEnabled(false);
+  pauseButton_->setObjectName(QStringLiteral("pauseButton"));
+  seekSlider_->setObjectName(QStringLiteral("seekSlider"));
+  seekSlider_->setRange(0, 0);
+  timeLabel_->setText(QStringLiteral("00:00:00 / 00:00:00"));
 
   auto* buttonLayout = new QHBoxLayout();
   buttonLayout->addWidget(openButton_);
+  buttonLayout->addWidget(pauseButton_);
   buttonLayout->addWidget(stopButton_);
 
+  auto* seekLayout = new QHBoxLayout();
+  seekLayout->addWidget(seekSlider_, 1);
+  seekLayout->addWidget(timeLabel_);
+
   connect(openButton_, &QPushButton::clicked, this, &MainWindow::openMediaFile);
+  connect(pauseButton_, &QPushButton::clicked, this, &MainWindow::togglePauseResume);
   connect(stopButton_, &QPushButton::clicked, this, &MainWindow::stopPlayback);
+  connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
   connect(playbackStatusTimer_, &QTimer::timeout, this, &MainWindow::updatePlaybackStatus);
@@ -93,6 +132,7 @@ MainWindow::MainWindow(QWidget* parent)
   layout->addWidget(statusLabel_);
   layout->addLayout(buttonLayout);
   layout->addWidget(videoLabel_, 1);
+  layout->addLayout(seekLayout);
   layout->addWidget(mediaInfoLabel_);
   setCentralWidget(central);
 
@@ -161,8 +201,13 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
 bool MainWindow::startPlayback(const MediaInfo& info) {
   player_.stop();
   playbackStatusTimer_->stop();
+  pauseButton_->setEnabled(false);
   stopButton_->setEnabled(false);
   displayedVideoFrameCount_ = 0;
+  durationMs_ = info.durationMs;
+  seekSlider_->setRange(0, static_cast<int>(durationMs_));
+  seekSlider_->setValue(0);
+  updateTimeLabel(0);
 
   if (!info.hasAudio && !info.hasVideo) {
     statusBar()->showMessage(QStringLiteral("媒体没有可播放的音视频流"));
@@ -180,6 +225,8 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   }
 
   stopButton_->setEnabled(true);
+  pauseButton_->setEnabled(true);
+  pauseButton_->setText(QStringLiteral("暂停"));
   playbackStatusTimer_->start(300);
   if (info.hasVideo) {
     videoLabel_->setText(QStringLiteral("正在准备视频画面"));
@@ -193,7 +240,11 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
 void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
   player_.stop();
+  pauseButton_->setEnabled(false);
+  pauseButton_->setText(QStringLiteral("暂停"));
   stopButton_->setEnabled(false);
+  seekSlider_->setValue(0);
+  updateTimeLabel(0);
   videoLabel_->setText(QStringLiteral("播放已停止"));
   statusBar()->showMessage(QStringLiteral("播放已停止"));
 }
@@ -206,10 +257,35 @@ std::size_t MainWindow::displayedVideoFrameCount() const {
   return displayedVideoFrameCount_;
 }
 
+bool MainWindow::seekInProgress() const {
+  return player_.seekInProgress();
+}
+
 void MainWindow::updatePlaybackStatus() {
   if (player_.state() == PlaybackState::Stopped) {
     playbackStatusTimer_->stop();
+    pauseButton_->setEnabled(false);
     stopButton_->setEnabled(false);
+    return;
+  }
+
+  const qint64 positionMs = player_.audioClockMs();
+  if (!seekSlider_->isSliderDown() && durationMs_ > 0) {
+    seekSlider_->setValue(static_cast<int>(std::min(positionMs, durationMs_)));
+  }
+  updateTimeLabel(positionMs);
+
+  pauseButton_->setText(player_.state() == PlaybackState::Paused
+      ? QStringLiteral("继续")
+      : QStringLiteral("暂停"));
+
+  if (player_.seekInProgress()) {
+    statusBar()->showMessage(QStringLiteral("正在跳转..."));
+    return;
+  }
+
+  if (player_.state() == PlaybackState::Paused) {
+    statusBar()->showMessage(QStringLiteral("已暂停"));
     return;
   }
 
@@ -266,4 +342,32 @@ void MainWindow::displayVideoFrame(const QImage& image) {
       Qt::KeepAspectRatio,
       Qt::SmoothTransformation));
   ++displayedVideoFrameCount_;
+}
+
+void MainWindow::togglePauseResume() {
+  if (player_.state() == PlaybackState::Paused) {
+    player_.resume();
+  } else {
+    player_.pause();
+  }
+
+  updatePlaybackStatus();
+}
+
+void MainWindow::seekToSliderValue() {
+  if (durationMs_ <= 0) {
+    return;
+  }
+
+  player_.seekTo(seekSlider_->value());
+  updatePlaybackStatus();
+}
+
+void MainWindow::updateTimeLabel(qint64 positionMs) {
+  const qint64 boundedPosition = durationMs_ > 0
+      ? std::min(positionMs, durationMs_)
+      : positionMs;
+  timeLabel_->setText(QStringLiteral("%1 / %2")
+      .arg(formatDuration(boundedPosition))
+      .arg(formatDuration(durationMs_)));
 }
