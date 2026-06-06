@@ -23,6 +23,7 @@ set(ECHOTRANS_FFMPEG_LIBRARIES
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avcodec.lib"
   "${ECHOTRANS_FFMPEG_LIB_DIR}/avutil.lib"
   "${ECHOTRANS_FFMPEG_LIB_DIR}/swresample.lib"
+  "${ECHOTRANS_FFMPEG_LIB_DIR}/swscale.lib"
 )
 
 add_library(EchoTransCore

@@ -4,6 +4,8 @@
 
 #include <QDir>
 #include <QFile>
+#include <QCoreApplication>
+#include <QProcess>
 #include <QTemporaryDir>
 
 #include <cstring>
@@ -58,6 +60,31 @@ QString writeSilentWavFile(const QString& path) {
   file.write(wav);
   return path;
 }
+
+QString writeTestAudioVideoFile(const QString& path) {
+  const QString ffmpegPath = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
+  if (!QFile::exists(ffmpegPath)) {
+    return QString();
+  }
+
+  QProcess ffmpeg;
+  ffmpeg.start(ffmpegPath, QStringList()
+      << QStringLiteral("-y")
+      << QStringLiteral("-f") << QStringLiteral("lavfi")
+      << QStringLiteral("-i") << QStringLiteral("testsrc=size=64x48:rate=10:duration=1")
+      << QStringLiteral("-f") << QStringLiteral("lavfi")
+      << QStringLiteral("-i") << QStringLiteral("sine=frequency=440:duration=1")
+      << QStringLiteral("-shortest")
+      << QStringLiteral("-c:v") << QStringLiteral("mpeg4")
+      << QStringLiteral("-c:a") << QStringLiteral("pcm_s16le")
+      << path);
+
+  if (!ffmpeg.waitForFinished(10000) || ffmpeg.exitCode() != 0) {
+    return QString();
+  }
+
+  return path;
+}
 }
 
 class MediaPlayerCoreTests : public QObject {
@@ -76,6 +103,7 @@ private slots:
   void demuxThreadReportsOpenFailure();
   void audioDecodeThreadProducesPcmFrames();
   void audioOutputThreadConsumesFramesOrReportsDeviceError();
+  void videoDecodeThreadProducesImages();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -183,7 +211,7 @@ void MediaPlayerCoreTests::demuxThreadQueuesAudioPackets() {
   QTRY_VERIFY_WITH_TIMEOUT(player.demuxFinished(), 1000);
   QVERIFY2(player.lastDemuxError().isEmpty(), qPrintable(player.lastDemuxError()));
   QVERIFY(player.demuxedAudioPacketCount() > 0);
-  QCOMPARE(player.videoPacketQueueSize(), static_cast<std::size_t>(0));
+  QCOMPARE(player.demuxedVideoPacketCount(), static_cast<std::size_t>(0));
 }
 
 void MediaPlayerCoreTests::demuxThreadReportsOpenFailure() {
@@ -230,6 +258,26 @@ void MediaPlayerCoreTests::audioOutputThreadConsumesFramesOrReportsDeviceError()
       2000);
 
   QVERIFY(player.audioOutputByteCount() > 0 || !player.lastAudioOutputError().isEmpty());
+}
+
+void MediaPlayerCoreTests::videoDecodeThreadProducesImages() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(player.decodedVideoFrameCount() > 0, 2000);
+  QVERIFY2(player.lastVideoDecodeError().isEmpty(), qPrintable(player.lastVideoDecodeError()));
+
+  QImage image;
+  QTRY_VERIFY_WITH_TIMEOUT(player.takeVideoFrame(&image), 1000);
+  QVERIFY(!image.isNull());
+  QCOMPARE(image.size(), QSize(64, 48));
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)

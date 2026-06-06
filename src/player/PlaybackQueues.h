@@ -3,6 +3,7 @@
 #include "player/BlockingQueue.h"
 
 #include <QByteArray>
+#include <QImage>
 #include <QtGlobal>
 
 #include <memory>
@@ -29,6 +30,7 @@ struct PlaybackFrame {
   int sampleRate = 0;
   int channelCount = 0;
   int bytesPerSample = 0;
+  QImage image;
   bool endOfStream = false;
 };
 

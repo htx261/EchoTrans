@@ -3,6 +3,8 @@
 #include "ui/MainWindow.h"
 
 #include <QFile>
+#include <QCoreApplication>
+#include <QProcess>
 #include <QTemporaryDir>
 
 #include <cstring>
@@ -57,6 +59,31 @@ QString writeSilentWavFile(const QString& path) {
   file.write(wav);
   return path;
 }
+
+QString writeTestAudioVideoFile(const QString& path) {
+  const QString ffmpegPath = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
+  if (!QFile::exists(ffmpegPath)) {
+    return QString();
+  }
+
+  QProcess ffmpeg;
+  ffmpeg.start(ffmpegPath, QStringList()
+      << QStringLiteral("-y")
+      << QStringLiteral("-f") << QStringLiteral("lavfi")
+      << QStringLiteral("-i") << QStringLiteral("testsrc=size=64x48:rate=10:duration=1")
+      << QStringLiteral("-f") << QStringLiteral("lavfi")
+      << QStringLiteral("-i") << QStringLiteral("sine=frequency=440:duration=1")
+      << QStringLiteral("-shortest")
+      << QStringLiteral("-c:v") << QStringLiteral("mpeg4")
+      << QStringLiteral("-c:a") << QStringLiteral("pcm_s16le")
+      << path);
+
+  if (!ffmpeg.waitForFinished(10000) || ffmpeg.exitCode() != 0) {
+    return QString();
+  }
+
+  return path;
+}
 }
 
 class MainWindowTests : public QObject {
@@ -64,6 +91,7 @@ class MainWindowTests : public QObject {
 
 private slots:
   void startsAndStopsPlaybackFromMediaInfo();
+  void displaysVideoFramesFromPlayback();
 };
 
 void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
@@ -83,6 +111,29 @@ void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
 
   window.stopPlayback();
   QCOMPARE(window.playbackState(), PlaybackState::Stopped);
+}
+
+void MainWindowTests::displaysVideoFramesFromPlayback() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")));
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  MainWindow window;
+  window.resize(640, 480);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  QVERIFY(window.startPlayback(info));
+  QTRY_VERIFY_WITH_TIMEOUT(window.displayedVideoFrameCount() > 0, 3000);
+
+  window.stopPlayback();
 }
 
 QTEST_MAIN(MainWindowTests)
