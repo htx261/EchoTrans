@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QCoreApplication>
 #include <QProcess>
+#include <QPushButton>
+#include <QSlider>
 #include <QTemporaryDir>
 
 #include <cstring>
@@ -60,7 +62,7 @@ QString writeSilentWavFile(const QString& path) {
   return path;
 }
 
-QString writeTestAudioVideoFile(const QString& path) {
+QString writeTestAudioVideoFile(const QString& path, int durationSeconds = 1) {
   const QString ffmpegPath = QCoreApplication::applicationDirPath() + QStringLiteral("/ffmpeg.exe");
   if (!QFile::exists(ffmpegPath)) {
     return QString();
@@ -70,9 +72,9 @@ QString writeTestAudioVideoFile(const QString& path) {
   ffmpeg.start(ffmpegPath, QStringList()
       << QStringLiteral("-y")
       << QStringLiteral("-f") << QStringLiteral("lavfi")
-      << QStringLiteral("-i") << QStringLiteral("testsrc=size=64x48:rate=10:duration=1")
+      << QStringLiteral("-i") << QStringLiteral("testsrc=size=64x48:rate=10:duration=%1").arg(durationSeconds)
       << QStringLiteral("-f") << QStringLiteral("lavfi")
-      << QStringLiteral("-i") << QStringLiteral("sine=frequency=440:duration=1")
+      << QStringLiteral("-i") << QStringLiteral("sine=frequency=440:duration=%1").arg(durationSeconds)
       << QStringLiteral("-shortest")
       << QStringLiteral("-c:v") << QStringLiteral("mpeg4")
       << QStringLiteral("-c:a") << QStringLiteral("pcm_s16le")
@@ -92,6 +94,8 @@ class MainWindowTests : public QObject {
 private slots:
   void startsAndStopsPlaybackFromMediaInfo();
   void displaysVideoFramesFromPlayback();
+  void pauseButtonTogglesPauseAndResume();
+  void seekSliderClickAndDragRequestSeek();
 };
 
 void MainWindowTests::startsAndStopsPlaybackFromMediaInfo() {
@@ -134,6 +138,65 @@ void MainWindowTests::displaysVideoFramesFromPlayback() {
   QTRY_VERIFY_WITH_TIMEOUT(window.displayedVideoFrameCount() > 0, 3000);
 
   window.stopPlayback();
+}
+
+void MainWindowTests::pauseButtonTogglesPauseAndResume() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 3);
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.durationMs = 3000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  MainWindow window;
+  QVERIFY(window.startPlayback(info));
+
+  auto* pauseButton = window.findChild<QPushButton*>(QStringLiteral("pauseButton"));
+  QVERIFY(pauseButton);
+
+  QTest::mouseClick(pauseButton, Qt::LeftButton);
+  QCOMPARE(window.playbackState(), PlaybackState::Paused);
+
+  QTest::mouseClick(pauseButton, Qt::LeftButton);
+  QCOMPARE(window.playbackState(), PlaybackState::Playing);
+}
+
+void MainWindowTests::seekSliderClickAndDragRequestSeek() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 4);
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.durationMs = 4000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  MainWindow window;
+  window.resize(640, 480);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+  QVERIFY(window.startPlayback(info));
+
+  auto* seekSlider = window.findChild<QSlider*>(QStringLiteral("seekSlider"));
+  QVERIFY(seekSlider);
+
+  seekSlider->setSliderDown(true);
+  seekSlider->setValue(3000);
+  QTest::qWait(100);
+  QVERIFY(!window.seekInProgress());
+
+  seekSlider->setSliderDown(false);
+  QMetaObject::invokeMethod(seekSlider, "sliderReleased", Qt::DirectConnection);
+
+  QTRY_VERIFY_WITH_TIMEOUT(window.seekInProgress(), 1000);
 }
 
 QTEST_MAIN(MainWindowTests)

@@ -71,6 +71,7 @@ bool receiveDecodedAudioFrames(
     PlaybackQueues* queues,
     std::atomic_size_t* decodedFrameCount,
     std::atomic_size_t* decodedByteCount,
+    qint64 minimumPtsMs,
     QString* errorMessage) {
   while (true) {
     const int receiveResult = avcodec_receive_frame(codecContext, frame);
@@ -104,6 +105,12 @@ bool receiveDecodedAudioFrames(
     playbackFrame.ptsMs = frame->pts == AV_NOPTS_VALUE
         ? 0
         : av_rescale_q(frame->pts, codecContext->time_base, AVRational{1, 1000});
+
+    if (playbackFrame.ptsMs < minimumPtsMs) {
+      av_frame_unref(frame);
+      continue;
+    }
+
     playbackFrame.sampleRate = OutputSampleRate;
     playbackFrame.channelCount = OutputChannelCount;
     playbackFrame.bytesPerSample = OutputBytesPerSample;
@@ -248,6 +255,10 @@ std::size_t MediaPlayerCore::decodedVideoFrameCount() const {
   return decodedVideoFrameCount_.load();
 }
 
+qint64 MediaPlayerCore::lastPublishedVideoPtsMs() const {
+  return lastPublishedVideoPtsMs_.load();
+}
+
 bool MediaPlayerCore::takeVideoFrame(QImage* image) {
   if (!image) {
     return false;
@@ -293,14 +304,9 @@ bool MediaPlayerCore::open(const QString& filePath) {
   std::lock_guard<std::mutex> lock(mutex_);
   mediaPath_ = trimmedPath;
   playbackQueues_ = std::make_unique<PlaybackQueues>();
-  demuxFinished_.store(false);
-  demuxedAudioPacketCount_.store(0);
-  demuxedVideoPacketCount_.store(0);
-  decodedAudioFrameCount_.store(0);
-  decodedAudioByteCount_.store(0);
-  audioOutputByteCount_.store(0);
-  audioClockMs_.store(0);
-  decodedVideoFrameCount_.store(0);
+  startPositionMs_.store(0);
+  seekInProgress_.store(false);
+  resetPlaybackCounters(0);
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
   lastAudioOutputError_.clear();
@@ -310,6 +316,10 @@ bool MediaPlayerCore::open(const QString& filePath) {
 }
 
 bool MediaPlayerCore::play() {
+  if (state() == PlaybackState::Paused) {
+    return resume();
+  }
+
   std::lock_guard<std::mutex> lock(mutex_);
   if (mediaPath_.isEmpty()) {
     return false;
@@ -321,16 +331,88 @@ bool MediaPlayerCore::play() {
 }
 
 bool MediaPlayerCore::pause() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (state_ != PlaybackState::Playing) {
-    return false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_ != PlaybackState::Playing) {
+      return false;
+    }
+
+    pauseAcknowledged_.store(false);
+    paused_.store(true);
+    state_ = PlaybackState::Paused;
   }
 
-  state_ = PlaybackState::Paused;
+  std::unique_lock<std::mutex> acknowledgedLock(pauseAcknowledgedMutex_);
+  pauseAcknowledgedCondition_.wait_for(acknowledgedLock, std::chrono::milliseconds(300), [this]() {
+    return pauseAcknowledged_.load() || stopRequested_.load();
+  });
   return true;
 }
 
+bool MediaPlayerCore::resume() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_ != PlaybackState::Paused) {
+      return false;
+    }
+
+    paused_.store(false);
+    pauseAcknowledged_.store(false);
+    state_ = PlaybackState::Playing;
+  }
+
+  pauseCondition_.notify_all();
+  return true;
+}
+
+bool MediaPlayerCore::seekTo(qint64 positionMs) {
+  if (positionMs < 0 || mediaPath().isEmpty()) {
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(seekThreadMutex_);
+  if (seekInProgress_.load()) {
+    return false;
+  }
+
+  if (seekThread_.joinable()) {
+    seekThread_.join();
+  }
+
+  seekInProgress_.store(true);
+  seekThread_ = std::thread(&MediaPlayerCore::performSeek, this, positionMs);
+  return true;
+}
+
+bool MediaPlayerCore::seekInProgress() const {
+  return seekInProgress_.load();
+}
+
 void MediaPlayerCore::stop() {
+  std::unique_lock<std::mutex> controlLock(controlMutex_);
+  stopWorkers(true);
+  controlLock.unlock();
+
+  std::lock_guard<std::mutex> seekLock(seekThreadMutex_);
+  if (seekThread_.joinable()
+      && seekThread_.get_id() != std::this_thread::get_id()) {
+    seekThread_.join();
+  }
+}
+
+void MediaPlayerCore::resetPlaybackCounters(qint64 clockMs) {
+  demuxFinished_.store(false);
+  demuxedAudioPacketCount_.store(0);
+  demuxedVideoPacketCount_.store(0);
+  decodedAudioFrameCount_.store(0);
+  decodedAudioByteCount_.store(0);
+  audioOutputByteCount_.store(0);
+  audioClockMs_.store(clockMs);
+  decodedVideoFrameCount_.store(0);
+  lastPublishedVideoPtsMs_.store(-1);
+}
+
+void MediaPlayerCore::stopWorkers(bool clearMediaPath) {
   std::vector<std::thread> workersToJoin;
 
   {
@@ -340,6 +422,8 @@ void MediaPlayerCore::stop() {
     }
 
     stopRequested_.store(true);
+    paused_.store(false);
+    pauseAcknowledged_.store(false);
     if (playbackQueues_) {
       playbackQueues_->closeAll();
     }
@@ -348,6 +432,8 @@ void MediaPlayerCore::stop() {
   }
 
   workerCondition_.notify_all();
+  pauseCondition_.notify_all();
+  pauseAcknowledgedCondition_.notify_all();
 
   for (std::thread& worker : workersToJoin) {
     if (worker.joinable()) {
@@ -357,7 +443,41 @@ void MediaPlayerCore::stop() {
 
   std::lock_guard<std::mutex> lock(mutex_);
   state_ = PlaybackState::Stopped;
-  mediaPath_.clear();
+  if (clearMediaPath) {
+    mediaPath_.clear();
+  }
+}
+
+void MediaPlayerCore::performSeek(qint64 positionMs) {
+  const QString path = mediaPath();
+  const bool resumeAfterSeek = state() == PlaybackState::Playing;
+
+  {
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    stopWorkers(false);
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      mediaPath_ = path;
+      playbackQueues_ = std::make_unique<PlaybackQueues>();
+      startPositionMs_.store(positionMs);
+      resetPlaybackCounters(positionMs);
+      lastDemuxError_.clear();
+      lastAudioDecodeError_.clear();
+      lastAudioOutputError_.clear();
+      lastVideoDecodeError_.clear();
+      state_ = PlaybackState::Opening;
+    }
+
+    if (resumeAfterSeek) {
+      play();
+    } else {
+      state_ = PlaybackState::Paused;
+      paused_.store(true);
+    }
+  }
+
+  seekInProgress_.store(false);
 }
 
 void MediaPlayerCore::startWorkersLocked() {
@@ -370,14 +490,7 @@ void MediaPlayerCore::startWorkersLocked() {
     playbackQueues_ = std::make_unique<PlaybackQueues>();
   }
 
-  demuxFinished_.store(false);
-  demuxedAudioPacketCount_.store(0);
-  demuxedVideoPacketCount_.store(0);
-  decodedAudioFrameCount_.store(0);
-  decodedAudioByteCount_.store(0);
-  audioOutputByteCount_.store(0);
-  audioClockMs_.store(0);
-  decodedVideoFrameCount_.store(0);
+  resetPlaybackCounters(startPositionMs_.load());
   lastDemuxError_.clear();
   lastAudioDecodeError_.clear();
   lastAudioOutputError_.clear();
@@ -425,12 +538,21 @@ void MediaPlayerCore::demuxLoop() {
 
   const int videoStreamIndex = av_find_best_stream(formatContext, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
   const int audioStreamIndex = av_find_best_stream(formatContext, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+  const qint64 seekPositionMs = startPositionMs_.load();
+  if (seekPositionMs > 0) {
+    av_seek_frame(formatContext, -1, seekPositionMs * AV_TIME_BASE / 1000, AVSEEK_FLAG_BACKWARD);
+  }
   AVPacket* packet = av_packet_alloc();
 
   if (!packet) {
     setLastDemuxError(QStringLiteral("创建 FFmpeg 包失败"));
   } else {
     while (!stopRequested_.load()) {
+      waitWhilePaused();
+      if (stopRequested_.load()) {
+        break;
+      }
+
       result = av_read_frame(formatContext, packet);
       if (result < 0) {
         if (result != AVERROR_EOF) {
@@ -541,6 +663,7 @@ void MediaPlayerCore::videoDecodeLoop() {
   }
 
   AVStream* videoStream = formatContext->streams[videoStreamIndex];
+  const qint64 minimumPtsMs = startPositionMs_.load();
   const AVCodec* codec = avcodec_find_decoder(videoStream->codecpar->codec_id);
   if (!codec) {
     setLastVideoDecodeError(QStringLiteral("未找到视频解码器"));
@@ -610,6 +733,11 @@ void MediaPlayerCore::videoDecodeLoop() {
   } else {
     PlaybackPacket packet;
     while (!stopRequested_.load() && queues->videoPackets.waitPop(packet)) {
+      waitWhilePaused();
+      if (stopRequested_.load()) {
+        break;
+      }
+
       const int sendResult = packet.endOfStream
           ? avcodec_send_packet(codecContext, nullptr)
           : avcodec_send_packet(codecContext, packet.packet.get());
@@ -658,6 +786,12 @@ void MediaPlayerCore::videoDecodeLoop() {
         playbackFrame.ptsMs = frame->pts == AV_NOPTS_VALUE
             ? packet.ptsMs
             : av_rescale_q(frame->pts, videoStream->time_base, AVRational{1, 1000});
+
+        if (playbackFrame.ptsMs < minimumPtsMs) {
+          av_frame_unref(frame);
+          continue;
+        }
+
         playbackFrame.image = image.copy();
 
         if (!queues->videoFrames.push(std::move(playbackFrame))) {
@@ -833,11 +967,17 @@ void MediaPlayerCore::audioDecodeLoop() {
   }
 
   AVFrame* frame = av_frame_alloc();
+  const qint64 minimumPtsMs = startPositionMs_.load();
   if (!frame) {
     setLastAudioDecodeError(QStringLiteral("创建音频帧失败"));
   } else {
     PlaybackPacket packet;
     while (!stopRequested_.load() && queues->audioPackets.waitPop(packet)) {
+      waitWhilePaused();
+      if (stopRequested_.load()) {
+        break;
+      }
+
       const int sendResult = packet.endOfStream
           ? avcodec_send_packet(codecContext, nullptr)
           : avcodec_send_packet(codecContext, packet.packet.get());
@@ -855,6 +995,7 @@ void MediaPlayerCore::audioDecodeLoop() {
               queues,
               &decodedAudioFrameCount_,
               &decodedAudioByteCount_,
+              minimumPtsMs,
               &decodeError)) {
         if (!decodeError.isEmpty()) {
           setLastAudioDecodeError(decodeError);
@@ -921,7 +1062,25 @@ void MediaPlayerCore::audioOutputLoop() {
 
   PlaybackFrame frame;
   PlaybackFrame pendingVideoFrame;
+  bool hasAudioClockBase = false;
+  qint64 audioClockBaseMs = 0;
+  qint64 lastAudioFrameEndMs = audioClockMs_.load();
+  auto updateOutputClock = [&]() {
+    if (!audioOutput || !hasAudioClockBase) {
+      return;
+    }
+
+    const qint64 clockMs = audioClockBaseMs + audioOutput->processedUSecs() / 1000;
+    audioClockMs_.store(clockMs);
+    publishVideoFramesForClock(clockMs, &pendingVideoFrame);
+  };
+
   while (!stopRequested_.load() && queues->audioFrames.waitPop(frame)) {
+    waitWhilePaused();
+    if (stopRequested_.load()) {
+      break;
+    }
+
     if (frame.endOfStream) {
       break;
     }
@@ -933,10 +1092,22 @@ void MediaPlayerCore::audioOutputLoop() {
       continue;
     }
 
+    if (!hasAudioClockBase) {
+      hasAudioClockBase = true;
+      audioClockBaseMs = frame.ptsMs;
+    }
+    lastAudioFrameEndMs = frame.ptsMs + audioFrameDurationMs(frame);
+
     qsizetype offset = 0;
     while (offset < frame.pcmData.size() && !stopRequested_.load()) {
+      waitWhilePaused();
+      if (stopRequested_.load()) {
+        break;
+      }
+
       const int writableBytes = audioOutput->bytesFree();
       if (writableBytes <= 0) {
+        updateOutputClock();
         QThread::msleep(5);
         continue;
       }
@@ -952,15 +1123,16 @@ void MediaPlayerCore::audioOutputLoop() {
 
       offset += written;
       audioOutputByteCount_.fetch_add(static_cast<std::size_t>(written));
-      const int bytesPerSecond = frame.sampleRate * frame.channelCount * frame.bytesPerSample;
-      if (bytesPerSecond > 0) {
-        const qint64 frameClockMs = frame.ptsMs
-            + static_cast<qint64>(
-                static_cast<double>(offset) * 1000.0 / static_cast<double>(bytesPerSecond));
-        audioClockMs_.store(frameClockMs);
-        publishVideoFramesForClock(frameClockMs, &pendingVideoFrame);
-      }
+      updateOutputClock();
     }
+  }
+
+  while (audioOutput
+      && hasAudioClockBase
+      && !stopRequested_.load()
+      && audioClockMs_.load() < lastAudioFrameEndMs) {
+    updateOutputClock();
+    QThread::msleep(10);
   }
 
   if (audioOutput) {
@@ -987,6 +1159,7 @@ void MediaPlayerCore::publishVideoFramesForClock(qint64 audioClockMs, PlaybackFr
 
   auto publishFrame = [&](const PlaybackFrame& frame) {
     if (!frame.image.isNull()) {
+      lastPublishedVideoPtsMs_.store(frame.ptsMs);
       callback(frame.image, audioClockMs);
     }
   };
@@ -1028,6 +1201,18 @@ void MediaPlayerCore::waitUntilStopRequested() {
   std::unique_lock<std::mutex> lock(workerMutex_);
   workerCondition_.wait(lock, [this]() {
     return stopRequested_.load();
+  });
+}
+
+void MediaPlayerCore::waitWhilePaused() {
+  std::unique_lock<std::mutex> lock(pauseMutex_);
+  if (paused_.load() && !stopRequested_.load()) {
+    pauseAcknowledged_.store(true);
+    pauseAcknowledgedCondition_.notify_all();
+  }
+
+  pauseCondition_.wait(lock, [this]() {
+    return !paused_.load() || stopRequested_.load();
   });
 }
 
