@@ -8,15 +8,22 @@
 template <typename T>
 class BlockingQueue {
 public:
-  bool push(T item) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (closed_) {
-        return false;
-      }
+  explicit BlockingQueue(std::size_t maxSize = 0)
+      : maxSize_(maxSize) {
+  }
 
-      queue_.push(std::move(item));
+  bool push(T item) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [this]() {
+      return closed_ || maxSize_ == 0 || queue_.size() < maxSize_;
+    });
+
+    if (closed_) {
+      return false;
     }
+
+    queue_.push(std::move(item));
+    lock.unlock();
 
     condition_.notify_one();
     return true;
@@ -34,24 +41,34 @@ public:
 
     item = std::move(queue_.front());
     queue_.pop();
+    lock.unlock();
+
+    condition_.notify_one();
     return true;
   }
 
   bool tryPop(T& item) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     if (queue_.empty()) {
       return false;
     }
 
     item = std::move(queue_.front());
     queue_.pop();
+    lock.unlock();
+
+    condition_.notify_one();
     return true;
   }
 
   void clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::queue<T> empty;
-    queue_.swap(empty);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      std::queue<T> empty;
+      queue_.swap(empty);
+    }
+
+    condition_.notify_all();
   }
 
   void close() {
@@ -73,9 +90,14 @@ public:
     return queue_.size();
   }
 
+  std::size_t maxSize() const {
+    return maxSize_;
+  }
+
 private:
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   std::queue<T> queue_;
+  std::size_t maxSize_ = 0;
   bool closed_ = false;
 };

@@ -2,6 +2,64 @@
 
 #include "player/MediaPlayerCore.h"
 
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+
+#include <cstring>
+
+namespace {
+void appendAscii(QByteArray* bytes, const char* text) {
+  bytes->append(text, static_cast<int>(std::strlen(text)));
+}
+
+void appendLe16(QByteArray* bytes, quint16 value) {
+  bytes->append(static_cast<char>(value & 0xff));
+  bytes->append(static_cast<char>((value >> 8) & 0xff));
+}
+
+void appendLe32(QByteArray* bytes, quint32 value) {
+  bytes->append(static_cast<char>(value & 0xff));
+  bytes->append(static_cast<char>((value >> 8) & 0xff));
+  bytes->append(static_cast<char>((value >> 16) & 0xff));
+  bytes->append(static_cast<char>((value >> 24) & 0xff));
+}
+
+QString writeSilentWavFile(const QString& path) {
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly)) {
+    return QString();
+  }
+
+  const quint16 channels = 1;
+  const quint32 sampleRate = 8000;
+  const quint16 bitsPerSample = 16;
+  const quint16 blockAlign = channels * bitsPerSample / 8;
+  const quint32 byteRate = sampleRate * blockAlign;
+  const quint32 sampleCount = 8000;
+  const quint32 dataSize = sampleCount * blockAlign;
+
+  QByteArray wav;
+  appendAscii(&wav, "RIFF");
+  appendLe32(&wav, 36 + dataSize);
+  appendAscii(&wav, "WAVE");
+  appendAscii(&wav, "fmt ");
+  appendLe32(&wav, 16);
+  appendLe16(&wav, 1);
+  appendLe16(&wav, channels);
+  appendLe32(&wav, sampleRate);
+  appendLe32(&wav, byteRate);
+  appendLe16(&wav, blockAlign);
+  appendLe16(&wav, bitsPerSample);
+  appendAscii(&wav, "data");
+  appendLe32(&wav, dataSize);
+  wav.append(QByteArray(static_cast<int>(dataSize), '\0'));
+
+  file.write(wav);
+  return path;
+}
+}
+
 class MediaPlayerCoreTests : public QObject {
   Q_OBJECT
 
@@ -14,6 +72,8 @@ private slots:
   void playStartsWorkerThreads();
   void stopStopsWorkerThreadsAndClosesQueues();
   void destructorStopsWorkerThreads();
+  void demuxThreadQueuesAudioPackets();
+  void demuxThreadReportsOpenFailure();
 };
 
 void MediaPlayerCoreTests::startsStopped() {
@@ -105,6 +165,35 @@ void MediaPlayerCoreTests::destructorStopsWorkerThreads() {
   }
 
   QVERIFY(true);
+}
+
+void MediaPlayerCoreTests::demuxThreadQueuesAudioPackets() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("silent.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaPlayerCore player;
+  QVERIFY(player.open(path));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(player.demuxFinished(), 1000);
+  QVERIFY2(player.lastDemuxError().isEmpty(), qPrintable(player.lastDemuxError()));
+  QVERIFY(player.audioPacketQueueSize() > 0);
+  QCOMPARE(player.videoPacketQueueSize(), static_cast<std::size_t>(0));
+}
+
+void MediaPlayerCoreTests::demuxThreadReportsOpenFailure() {
+  MediaPlayerCore player;
+
+  QVERIFY(player.open(QStringLiteral("Z:/missing/media.wav")));
+  QVERIFY(player.play());
+
+  QTRY_VERIFY_WITH_TIMEOUT(player.demuxFinished(), 1000);
+  QVERIFY(!player.lastDemuxError().isEmpty());
+  QCOMPARE(player.audioPacketQueueSize(), static_cast<std::size_t>(0));
+  QCOMPARE(player.videoPacketQueueSize(), static_cast<std::size_t>(0));
 }
 
 QTEST_MAIN(MediaPlayerCoreTests)

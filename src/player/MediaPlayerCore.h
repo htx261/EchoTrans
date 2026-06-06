@@ -25,6 +25,10 @@ public:
   QString mediaPath() const;
   std::size_t activeWorkerCount() const;
   bool playbackQueuesClosed() const;
+  bool demuxFinished() const;
+  QString lastDemuxError() const;
+  std::size_t audioPacketQueueSize() const;
+  std::size_t videoPacketQueueSize() const;
 
   bool open(const QString& filePath);
   bool play();
@@ -33,14 +37,19 @@ public:
 
 private:
   void startWorkersLocked();
-  void workerLoop();
+  void demuxLoop();
+  void placeholderWorkerLoop();
+  void waitUntilStopRequested();
+  void setLastDemuxError(const QString& message);
 
   mutable std::mutex mutex_;
   PlaybackState state_ = PlaybackState::Stopped;
   QString mediaPath_;
+  QString lastDemuxError_;
   std::unique_ptr<PlaybackQueues> playbackQueues_;
 
   std::atomic_bool stopRequested_{false};
+  std::atomic_bool demuxFinished_{false};
   std::atomic_size_t activeWorkerCount_{0};
   std::mutex workerMutex_;
   std::condition_variable workerCondition_;
