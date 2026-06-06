@@ -10,6 +10,7 @@ class WhisperTranscriberTests : public QObject {
 private slots:
   void defaultOptionsUseAutomaticLanguageAndBoundedThreads();
   void unavailableModelReportsErrorWithoutCommandLineFallback();
+  void transcribeReportsErrorWhenModelIsNotLoaded();
 };
 
 void WhisperTranscriberTests::defaultOptionsUseAutomaticLanguageAndBoundedThreads() {
@@ -17,7 +18,6 @@ void WhisperTranscriberTests::defaultOptionsUseAutomaticLanguageAndBoundedThread
 
   QVERIFY(options.modelPath.isEmpty());
   QVERIFY(options.languageCode.isEmpty());
-  QCOMPARE(options.segmentWindowMs, 10000);
   QVERIFY(options.threadCount >= 1);
   QVERIFY(options.threadCount <= TranscriptionOptions::maxThreadCount());
   QVERIFY(options.timestampsEnabled);
@@ -33,6 +33,17 @@ void WhisperTranscriberTests::unavailableModelReportsErrorWithoutCommandLineFall
   QVERIFY(!result.success);
   QVERIFY(result.errorMessage.contains(QStringLiteral("模型")));
   QVERIFY(!transcriber.isModelLoaded());
+}
+
+void WhisperTranscriberTests::transcribeReportsErrorWhenModelIsNotLoaded() {
+  WhisperTranscriber transcriber;
+
+  const TranscriptionResult result = transcriber.transcribe(
+      TranscriptionAudioInput{0, 16000, 1, QVector<float>(16000, 0.0f)});
+
+  QVERIFY(!result.success);
+  QVERIFY(result.errorMessage.contains(QStringLiteral("模型")));
+  QVERIFY(result.segments.isEmpty());
 }
 
 QTEST_MAIN(WhisperTranscriberTests)

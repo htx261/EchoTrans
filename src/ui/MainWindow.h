@@ -3,7 +3,7 @@
 #include "media/MediaInfo.h"
 #include "player/MediaPlayerCore.h"
 #include "subtitle/SubtitleTrack.h"
-#include "transcription/WhisperTranscriber.h"
+#include "transcription/MediaSubtitlePreparer.h"
 
 #include <QFutureWatcher>
 #include <QMainWindow>
@@ -35,7 +35,12 @@ public:
 private:
   void openMediaFile();
   void onMediaProbeFinished();
+  void onSubtitlePreparationFinished();
   void showMediaInfo(const MediaProbeResult& result);
+  void startSubtitlePreparation(const MediaInfo& info);
+  void updateSubtitlePreparationProgress(
+      int generation,
+      const MediaSubtitlePreparationProgress& progress);
   void updatePlaybackStatus();
   void displayVideoFrame(const QImage& image);
   void togglePauseResume();
@@ -61,15 +66,17 @@ private:
   QComboBox* transcriptionModelComboBox_ = nullptr;
   QComboBox* transcriptionLanguageComboBox_ = nullptr;
   QSpinBox* transcriptionThreadSpinBox_ = nullptr;
-  QSpinBox* transcriptionWindowSpinBox_ = nullptr;
   QLineEdit* transcriptionPromptEdit_ = nullptr;
   QFutureWatcher<MediaProbeResult>* mediaProbeWatcher_ = nullptr;
+  QFutureWatcher<MediaSubtitlePreparationResult>* subtitlePreparationWatcher_ = nullptr;
   QTimer* playbackStatusTimer_ = nullptr;
   MediaPlayerCore player_;
+  MediaInfo pendingPlaybackInfo_;
   std::size_t displayedVideoFrameCount_ = 0;
   qint64 durationMs_ = 0;
   qint64 pendingSeekPositionMs_ = -1;
   bool currentHasAudio_ = false;
   bool currentHasVideo_ = false;
+  int subtitlePreparationGeneration_ = 0;
   SubtitleTrack subtitleTrack_;
 };

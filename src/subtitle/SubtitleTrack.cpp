@@ -10,6 +10,17 @@ void SubtitleTrack::setSegments(QVector<SubtitleSegment> segments) {
   segments_ = std::move(segments);
 }
 
+void SubtitleTrack::appendSegment(const SubtitleSegment& segment) {
+  segments_.push_back(segment);
+  std::sort(segments_.begin(), segments_.end(), [](const SubtitleSegment& left, const SubtitleSegment& right) {
+    return left.startMs < right.startMs;
+  });
+}
+
+QVector<SubtitleSegment> SubtitleTrack::segments() const {
+  return segments_;
+}
+
 QString SubtitleTrack::textAt(qint64 positionMs) const {
   for (const SubtitleSegment& segment : segments_) {
     if (positionMs >= segment.startMs && positionMs < segment.endMs) {
