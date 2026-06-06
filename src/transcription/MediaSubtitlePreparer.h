@@ -5,7 +5,9 @@
 
 #include <QString>
 
+#include <atomic>
 #include <functional>
+#include <memory>
 
 enum class MediaSubtitlePreparationStage {
   LoadingModel,
@@ -24,10 +26,12 @@ struct MediaSubtitlePreparationRequest {
   QString mediaPath;
   TranscriptionOptions options;
   std::function<void(const MediaSubtitlePreparationProgress&)> progressCallback;
+  std::shared_ptr<std::atomic_bool> cancelRequested;
 };
 
 struct MediaSubtitlePreparationResult {
   bool success = false;
+  bool canceled = false;
   QString errorMessage;
   SubtitleTrack subtitleTrack;
 };

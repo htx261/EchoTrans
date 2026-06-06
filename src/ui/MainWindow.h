@@ -8,6 +8,9 @@
 #include <QFutureWatcher>
 #include <QMainWindow>
 
+#include <atomic>
+#include <memory>
+
 class QLabel;
 class QComboBox;
 class QLineEdit;
@@ -38,6 +41,11 @@ private:
   void onSubtitlePreparationFinished();
   void showMediaInfo(const MediaProbeResult& result);
   void startSubtitlePreparation(const MediaInfo& info);
+  void startPendingPlayback();
+  void startPendingTranscription();
+  void startPendingTranslation();
+  void cancelSubtitlePreparation();
+  void setTaskButtonsEnabled(bool enabled);
   void updateSubtitlePreparationProgress(
       int generation,
       const MediaSubtitlePreparationProgress& progress);
@@ -55,6 +63,10 @@ private:
   QPushButton* openButton_ = nullptr;
   QPushButton* pauseButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
+  QPushButton* directPlayButton_ = nullptr;
+  QPushButton* transcribeButton_ = nullptr;
+  QPushButton* translateSubtitleButton_ = nullptr;
+  QPushButton* cancelSubtitlePreparationButton_ = nullptr;
   QLabel* statusLabel_ = nullptr;
   QLabel* videoLabel_ = nullptr;
   QLabel* subtitleLabel_ = nullptr;
@@ -78,5 +90,6 @@ private:
   bool currentHasAudio_ = false;
   bool currentHasVideo_ = false;
   int subtitlePreparationGeneration_ = 0;
+  std::shared_ptr<std::atomic_bool> subtitlePreparationCancelRequested_;
   SubtitleTrack subtitleTrack_;
 };
