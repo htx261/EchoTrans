@@ -15,6 +15,8 @@ private slots:
   void closeWakesWaitingConsumers();
   void clearRemovesPendingItems();
   void rejectsPushAfterClose();
+  void pushWaitsWhenQueueIsFull();
+  void closeWakesWaitingProducers();
 };
 
 void BlockingQueueTests::pushesAndPopsInOrder() {
@@ -95,6 +97,53 @@ void BlockingQueueTests::rejectsPushAfterClose() {
   QVERIFY(queue.isClosed());
   QVERIFY(!queue.push(1));
   QCOMPARE(queue.size(), static_cast<std::size_t>(0));
+}
+
+void BlockingQueueTests::pushWaitsWhenQueueIsFull() {
+  BlockingQueue<int> queue(1);
+
+  QVERIFY(queue.push(1));
+  std::atomic_bool secondPushReturned(false);
+
+  std::thread producer([&]() {
+    queue.push(2);
+    secondPushReturned.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  QVERIFY(!secondPushReturned.load());
+
+  int value = 0;
+  QVERIFY(queue.waitPop(value));
+  QCOMPARE(value, 1);
+
+  producer.join();
+  QVERIFY(secondPushReturned.load());
+  QCOMPARE(queue.size(), static_cast<std::size_t>(1));
+
+  QVERIFY(queue.waitPop(value));
+  QCOMPARE(value, 2);
+}
+
+void BlockingQueueTests::closeWakesWaitingProducers() {
+  BlockingQueue<int> queue(1);
+
+  QVERIFY(queue.push(1));
+  std::atomic_bool pushReturned(false);
+  bool pushSucceeded = true;
+
+  std::thread producer([&]() {
+    pushSucceeded = queue.push(2);
+    pushReturned.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  queue.close();
+  producer.join();
+
+  QVERIFY(pushReturned.load());
+  QVERIFY(!pushSucceeded);
+  QCOMPARE(queue.size(), static_cast<std::size_t>(1));
 }
 
 QTEST_MAIN(BlockingQueueTests)

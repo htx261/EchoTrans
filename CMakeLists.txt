@@ -70,11 +70,15 @@ add_library(EchoTransPlayer
 target_include_directories(EchoTransPlayer
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+  PRIVATE
+    ${ECHOTRANS_FFMPEG_INCLUDE_DIR}
 )
 
 target_link_libraries(EchoTransPlayer
   PUBLIC
     Qt5::Core
+  PRIVATE
+    ${ECHOTRANS_FFMPEG_LIBRARIES}
 )
 
 function(echotrans_copy_ffmpeg_runtime target_name)
@@ -155,6 +159,8 @@ target_link_libraries(MediaPlayerCoreTests
     EchoTransPlayer
     Qt5::Test
 )
+
+echotrans_copy_ffmpeg_runtime(MediaPlayerCoreTests)
 
 enable_testing()
 add_test(NAME DependencyReportTests COMMAND DependencyReportTests)
