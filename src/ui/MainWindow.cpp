@@ -181,6 +181,8 @@ MainWindow::MainWindow(QWidget* parent)
   startTaskButton_->setEnabled(false);
   setTaskButtonsEnabled(false);
   cancelTaskButton_->setEnabled(false);
+  openButton_->setObjectName(QStringLiteral("openMediaButton"));
+  mediaInfoLabel_->setObjectName(QStringLiteral("mediaInfoLabel"));
   pauseButton_->setObjectName(QStringLiteral("pauseButton"));
   stopButton_->setObjectName(QStringLiteral("stopButton"));
   seekSlider_->setObjectName(QStringLiteral("seekSlider"));
@@ -191,9 +193,7 @@ MainWindow::MainWindow(QWidget* parent)
   topToolbar->setObjectName(QStringLiteral("topToolbar"));
   auto* topToolbarLayout = new QHBoxLayout(topToolbar);
   topToolbarLayout->setContentsMargins(0, 0, 0, 0);
-  topToolbarLayout->addWidget(openButton_);
   topToolbarLayout->addStretch(1);
-  topToolbarLayout->addWidget(mediaInfoLabel_, 1);
   topToolbarLayout->addWidget(statusLabel_);
 
   auto* seekLayout = new QHBoxLayout();
@@ -312,6 +312,8 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   group->setObjectName(QStringLiteral("taskOptionsPanel"));
   auto* groupLayout = new QVBoxLayout(group);
 
+  groupLayout->addWidget(openButton_);
+  groupLayout->addWidget(mediaInfoLabel_);
   taskTypeComboBox_->setObjectName(QStringLiteral("taskTypeComboBox"));
   taskTypeComboBox_->addItem(QStringLiteral("直接播放"), QStringLiteral("direct_play"));
   taskTypeComboBox_->addItem(QStringLiteral("仅生成字幕"), QStringLiteral("transcribe"));
@@ -325,7 +327,7 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   liveInterpretationDescription_->setObjectName(QStringLiteral("liveInterpretationDescription"));
   liveInterpretationDescription_->setWordWrap(true);
   liveInterpretationDescription_->setText(QStringLiteral(
-      "同声传译会边播放边进行实时转录，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
+      "同声传译会边播放边进行实时转录和翻译，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
   QFont liveDescriptionFont = liveInterpretationDescription_->font();
   liveDescriptionFont.setPointSize(std::max(8, liveDescriptionFont.pointSize() - 1));
   liveInterpretationDescription_->setFont(liveDescriptionFont);
@@ -457,7 +459,8 @@ void MainWindow::updateTaskSettingsVisibility() {
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
       : QStringLiteral("transcribe");
-  const bool translateTask = taskType == QStringLiteral("translate");
+  const bool translateTask = taskType == QStringLiteral("translate")
+      || taskType == QStringLiteral("live_interpretation");
   if (translationSettingsPanel_) {
     translationSettingsPanel_->setHidden(!translateTask);
   }
@@ -769,7 +772,7 @@ void MainWindow::startPendingLiveInterpretation() {
   latestLiveSubtitleText_.clear();
   updateSubtitle(0);
   updateTranscriptPanel(0);
-  statusBar()->showMessage(QStringLiteral("实时转录已开始，准确度可能不如预处理字幕"));
+  statusBar()->showMessage(QStringLiteral("同声传译已开始，字幕会实时显示译文并持续修正"));
   if (!startPlayback(pendingPlaybackInfo_)) {
     return;
   }
@@ -795,8 +798,8 @@ void MainWindow::startPendingLiveInterpretation() {
     request.streamStepMs = 500;
     request.streamLengthMs = 4000;
     request.streamKeepMs = 200;
-    request.translationIntervalMs = 1500;
-    request.translateSegments = false;
+    request.translationIntervalMs = 100;
+    request.translateSegments = true;
     request.cancelRequested = cancelRequested;
     request.takeAudioFrame = [this](TranscriptionAudioFrame* frame) {
       return player_.takeTranscriptionAudioFrame(frame);
@@ -901,6 +904,9 @@ void MainWindow::updateSubtitlePreparationProgress(
 }
 
 bool MainWindow::startPlayback(const MediaInfo& info) {
+  if (!info.filePath.trimmed().isEmpty()) {
+    pendingPlaybackInfo_ = info;
+  }
   player_.stop();
   playbackStatusTimer_->stop();
   pauseButton_->setEnabled(false);
@@ -959,8 +965,18 @@ void MainWindow::stopPlayback() {
   updateSubtitle(0);
   updateTranscriptPanel(0);
   videoLabel_->setText(QStringLiteral("打开媒体文件后显示画面"));
-  mediaInfoLabel_->setText(QStringLiteral("未打开文件"));
-  statusBar()->showMessage(QStringLiteral("播放已停止"));
+  if (pendingPlaybackInfo_.filePath.trimmed().isEmpty()) {
+    mediaInfoLabel_->setText(QStringLiteral("未打开文件"));
+    setTaskButtonsEnabled(false);
+    statusBar()->showMessage(QStringLiteral("播放已停止"));
+    return;
+  }
+
+  mediaInfoLabel_->setText(QStringLiteral("%1  %2")
+      .arg(QFileInfo(pendingPlaybackInfo_.filePath).fileName())
+      .arg(formatDuration(pendingPlaybackInfo_.durationMs)));
+  setTaskButtonsEnabled(true);
+  statusBar()->showMessage(QStringLiteral("播放已停止，可继续使用上一次媒体文件"));
 }
 
 PlaybackState MainWindow::playbackState() const {
