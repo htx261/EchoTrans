@@ -17,10 +17,7 @@ void DependencyReportTests::detectsConfiguredDependencies() {
 
   QVERIFY2(report.ffmpegAvailable, qPrintable(report.ffmpegPath));
   QVERIFY2(report.whisperAvailable, qPrintable(report.whisperPath));
-  QVERIFY2(report.ctranslate2Available, qPrintable(report.ctranslate2Path));
   QVERIFY2(report.whisperModelAvailable, qPrintable(report.whisperModelPath));
-  QVERIFY2(report.translationModelAvailable, qPrintable(report.translationModelPath));
-  QVERIFY2(report.tokenizerAvailable, qPrintable(report.tokenizerPath));
 }
 
 void DependencyReportTests::reportsMissingPath() {
@@ -34,10 +31,7 @@ void DependencyReportTests::summarizesReadyState() {
   DependencyReport report;
   report.ffmpegAvailable = true;
   report.whisperAvailable = true;
-  report.ctranslate2Available = true;
   report.whisperModelAvailable = true;
-  report.translationModelAvailable = true;
-  report.tokenizerAvailable = true;
 
   QVERIFY(report.isReady());
   QVERIFY(report.missingItems().isEmpty());
@@ -48,20 +42,16 @@ void DependencyReportTests::listsMissingResources() {
   DependencyReport report;
   report.ffmpegAvailable = true;
   report.whisperAvailable = false;
-  report.ctranslate2Available = true;
   report.whisperModelAvailable = false;
-  report.translationModelAvailable = true;
-  report.tokenizerAvailable = false;
 
   const QStringList missing = report.missingItems();
 
   QVERIFY(!report.isReady());
-  QCOMPARE(missing.size(), 3);
+  QCOMPARE(missing.size(), 2);
   QVERIFY(missing.contains(QStringLiteral("whisper.cpp")));
   QVERIFY(missing.contains(QStringLiteral("Whisper 模型")));
-  QVERIFY(missing.contains(QStringLiteral("NLLB Tokenizer")));
   QCOMPARE(report.startupMessage(),
-      QStringLiteral("启动检查失败：缺少 whisper.cpp、Whisper 模型、NLLB Tokenizer"));
+      QStringLiteral("启动检查失败：缺少 whisper.cpp、Whisper 模型"));
 }
 
 QTEST_MAIN(DependencyReportTests)

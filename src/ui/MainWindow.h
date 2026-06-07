@@ -4,6 +4,7 @@
 #include "player/MediaPlayerCore.h"
 #include "subtitle/SubtitleTrack.h"
 #include "transcription/MediaSubtitlePreparer.h"
+#include "translation/BaiduTranslator.h"
 
 #include <QFutureWatcher>
 #include <QMainWindow>
@@ -34,13 +35,17 @@ public:
   bool seekInProgress() const;
   void setSubtitleTrack(const SubtitleTrack& track);
   TranscriptionOptions transcriptionOptions() const;
+  BaiduTranslationSettings baiduTranslationSettings() const;
+#ifdef ECHOTRANS_TESTING
+  void setPendingPlaybackInfoForTest(const MediaInfo& info);
+#endif
 
 private:
   void openMediaFile();
   void onMediaProbeFinished();
   void onSubtitlePreparationFinished();
   void showMediaInfo(const MediaProbeResult& result);
-  void startSubtitlePreparation(const MediaInfo& info);
+  void startSubtitlePreparation(const MediaInfo& info, bool translateAfterTranscription);
   void startPendingPlayback();
   void startPendingTranscription();
   void startPendingTranslation();
@@ -58,7 +63,10 @@ private:
   void updateTranscriptPanel(qint64 positionMs);
   QLabel* createOptionDescription(const QString& objectName, const QString& text, QWidget* parent);
   void setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent);
+  void setupTranslationOptions(QVBoxLayout* layout, QWidget* parent);
   void populateTranscriptionModels();
+  void loadBaiduTranslationSettings();
+  void saveBaiduTranslationSettings();
 
   QPushButton* openButton_ = nullptr;
   QPushButton* pauseButton_ = nullptr;
@@ -79,6 +87,9 @@ private:
   QComboBox* transcriptionLanguageComboBox_ = nullptr;
   QSpinBox* transcriptionThreadSpinBox_ = nullptr;
   QLineEdit* transcriptionPromptEdit_ = nullptr;
+  QLineEdit* baiduAppIdEdit_ = nullptr;
+  QLineEdit* baiduSecretKeyEdit_ = nullptr;
+  QPushButton* saveBaiduSettingsButton_ = nullptr;
   QFutureWatcher<MediaProbeResult>* mediaProbeWatcher_ = nullptr;
   QFutureWatcher<MediaSubtitlePreparationResult>* subtitlePreparationWatcher_ = nullptr;
   QTimer* playbackStatusTimer_ = nullptr;

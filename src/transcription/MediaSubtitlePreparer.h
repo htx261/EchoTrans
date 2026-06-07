@@ -13,6 +13,7 @@ enum class MediaSubtitlePreparationStage {
   LoadingModel,
   ExtractingAudio,
   Transcribing,
+  Translating,
   Finished
 };
 
