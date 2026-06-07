@@ -1,6 +1,7 @@
 #include "translation/BaiduTranslator.h"
 
 #include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -20,7 +21,7 @@
 namespace {
 constexpr int RequestTimeoutMs = 15000;
 constexpr int TranslationBatchSize = 8;
-constexpr int BatchIntervalMs = 1000;
+constexpr int MinRequestIntervalMs = 100;
 constexpr int RateLimitRetryDelayMs = 3000;
 constexpr const char* BaiduRateLimitErrorCode = "54003";
 
@@ -39,6 +40,21 @@ BaiduTranslationResult canceledResult() {
   result.canceled = true;
   result.errorMessage = QStringLiteral("翻译已取消");
   return result;
+}
+
+bool sleepWithCancel(const BaiduTranslationRequest& request, int totalMs) {
+  int remainingMs = totalMs;
+  while (remainingMs > 0) {
+    if (isCanceled(request)) {
+      return false;
+    }
+
+    const int chunkMs = std::min(remainingMs, 50);
+    QThread::msleep(static_cast<unsigned long>(chunkMs));
+    remainingMs -= chunkMs;
+  }
+
+  return !isCanceled(request);
 }
 
 void reportProgress(
@@ -186,6 +202,18 @@ QString BaiduTranslator::joinBatchQueries(const QVector<SubtitleSegment>& segmen
   return queries.join(QStringLiteral("\n"));
 }
 
+int BaiduTranslator::nextRequestDelayMs(qint64 elapsedSinceLastRequestStartMs) {
+  if (elapsedSinceLastRequestStartMs <= 0) {
+    return MinRequestIntervalMs;
+  }
+
+  if (elapsedSinceLastRequestStartMs >= MinRequestIntervalMs) {
+    return 0;
+  }
+
+  return MinRequestIntervalMs - static_cast<int>(elapsedSinceLastRequestStartMs);
+}
+
 BaiduTranslationResult BaiduTranslator::translate(const BaiduTranslationRequest& request) {
   BaiduTranslationResult result;
 
@@ -208,9 +236,18 @@ BaiduTranslationResult BaiduTranslator::translate(const BaiduTranslationRequest&
 
   QNetworkAccessManager manager;
   QVector<SubtitleSegment> translatedSegments = sourceSegments;
+  QElapsedTimer lastRequestStartTimer;
+  bool hasSentRequest = false;
   for (int start = 0; start < translatedSegments.size(); start += TranslationBatchSize) {
     if (isCanceled(request)) {
       return canceledResult();
+    }
+
+    if (hasSentRequest) {
+      const int delayMs = nextRequestDelayMs(lastRequestStartTimer.elapsed());
+      if (delayMs > 0 && !sleepWithCancel(request, delayMs)) {
+        return canceledResult();
+      }
     }
 
     const int end = std::min(start + TranslationBatchSize, translatedSegments.size());
@@ -224,6 +261,8 @@ BaiduTranslationResult BaiduTranslator::translate(const BaiduTranslationRequest&
             .arg(translatedSegments.size()));
 
     const QString query = joinBatchQueries(translatedSegments, start, end);
+    lastRequestStartTimer.restart();
+    hasSentRequest = true;
     const BatchTranslationResponse response = translateBatchWithRetry(
         &manager,
         request,
@@ -240,10 +279,6 @@ BaiduTranslationResult BaiduTranslator::translate(const BaiduTranslationRequest&
 
     for (int batchIndex = 0; batchIndex < response.translatedTexts.size(); ++batchIndex) {
       translatedSegments[start + batchIndex].translatedText = response.translatedTexts[batchIndex];
-    }
-
-    if (end < translatedSegments.size() && !isCanceled(request)) {
-      QThread::msleep(BatchIntervalMs);
     }
   }
 
