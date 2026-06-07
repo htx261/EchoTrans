@@ -19,6 +19,7 @@
 #include <QMetaObject>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSettings>
 #include <QSlider>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -67,6 +68,21 @@ QString formatDuration(qint64 durationMs) {
 QString modelsRootPath() {
   return QString::fromUtf8(ECHOTRANS_MODELS_ROOT);
 }
+
+QString baiduSourceLanguageForWhisperLanguage(const QString& languageCode) {
+  if (languageCode == QStringLiteral("ja")) {
+    return QStringLiteral("jp");
+  }
+  if (languageCode == QStringLiteral("ko")) {
+    return QStringLiteral("kor");
+  }
+  if (languageCode == QStringLiteral("fr")) {
+    return QStringLiteral("fra");
+  }
+  return languageCode.trimmed().isEmpty()
+      ? QStringLiteral("auto")
+      : languageCode;
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -90,6 +106,9 @@ MainWindow::MainWindow(QWidget* parent)
       transcriptionLanguageComboBox_(new QComboBox(this)),
       transcriptionThreadSpinBox_(new QSpinBox(this)),
       transcriptionPromptEdit_(new QLineEdit(this)),
+      baiduAppIdEdit_(new QLineEdit(this)),
+      baiduSecretKeyEdit_(new QLineEdit(this)),
+      saveBaiduSettingsButton_(new QPushButton(QStringLiteral("保存翻译设置"), this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
       subtitlePreparationWatcher_(new QFutureWatcher<MediaSubtitlePreparationResult>(this)),
       playbackStatusTimer_(new QTimer(this)) {
@@ -176,6 +195,7 @@ MainWindow::MainWindow(QWidget* parent)
   connect(transcribeButton_, &QPushButton::clicked, this, &MainWindow::startPendingTranscription);
   connect(translateSubtitleButton_, &QPushButton::clicked, this, &MainWindow::startPendingTranslation);
   connect(cancelSubtitlePreparationButton_, &QPushButton::clicked, this, &MainWindow::cancelSubtitlePreparation);
+  connect(saveBaiduSettingsButton_, &QPushButton::clicked, this, &MainWindow::saveBaiduTranslationSettings);
   connect(pauseButton_, &QPushButton::clicked, this, &MainWindow::togglePauseResume);
   connect(stopButton_, &QPushButton::clicked, this, &MainWindow::stopPlayback);
   connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
@@ -220,6 +240,7 @@ MainWindow::MainWindow(QWidget* parent)
   rightLayout->setContentsMargins(0, 0, 0, 0);
   rightLayout->setSpacing(10);
   setupTranscriptionOptions(rightLayout, rightPane);
+  setupTranslationOptions(rightLayout, rightPane);
 
   auto* transcriptPanel = new QGroupBox(QStringLiteral("转录字幕"), rightPane);
   transcriptPanel->setObjectName(QStringLiteral("transcriptPanel"));
@@ -237,6 +258,7 @@ MainWindow::MainWindow(QWidget* parent)
   statusBar()->showMessage(report.isReady()
       ? QStringLiteral("启动检查通过")
       : QStringLiteral("启动检查失败"));
+  loadBaiduTranslationSettings();
 }
 
 MainWindow::~MainWindow() {
@@ -328,6 +350,33 @@ void MainWindow::setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent)
   layout->addWidget(group);
 }
 
+void MainWindow::setupTranslationOptions(QVBoxLayout* layout, QWidget* parent) {
+  auto* group = new QGroupBox(QStringLiteral("翻译设置"), parent);
+  group->setObjectName(QStringLiteral("translationSettingsPanel"));
+  auto* groupLayout = new QFormLayout(group);
+  groupLayout->setLabelAlignment(Qt::AlignRight);
+  groupLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
+  baiduAppIdEdit_->setObjectName(QStringLiteral("baiduAppIdEdit"));
+  baiduAppIdEdit_->setPlaceholderText(QStringLiteral("百度翻译 APP ID"));
+  groupLayout->addRow(QStringLiteral("APP ID"), baiduAppIdEdit_);
+
+  baiduSecretKeyEdit_->setObjectName(QStringLiteral("baiduSecretKeyEdit"));
+  baiduSecretKeyEdit_->setPlaceholderText(QStringLiteral("百度翻译密钥"));
+  baiduSecretKeyEdit_->setEchoMode(QLineEdit::Password);
+  groupLayout->addRow(QStringLiteral("密钥"), baiduSecretKeyEdit_);
+
+  saveBaiduSettingsButton_->setObjectName(QStringLiteral("saveBaiduSettingsButton"));
+  groupLayout->addRow(QString(), saveBaiduSettingsButton_);
+
+  groupLayout->addRow(QString(), createOptionDescription(
+      QStringLiteral("baiduTranslationDescription"),
+      QStringLiteral("使用用户自己的百度翻译开放平台 API 信息，保存后用于生成翻译字幕。"),
+      group));
+
+  layout->addWidget(group);
+}
+
 void MainWindow::populateTranscriptionModels() {
   transcriptionModelComboBox_->clear();
 
@@ -382,6 +431,20 @@ void MainWindow::onMediaProbeFinished() {
   showMediaInfo(mediaProbeWatcher_->result());
 }
 
+void MainWindow::loadBaiduTranslationSettings() {
+  QSettings settings;
+  baiduAppIdEdit_->setText(settings.value(QStringLiteral("baiduTranslator/appId")).toString());
+  baiduSecretKeyEdit_->setText(settings.value(QStringLiteral("baiduTranslator/secretKey")).toString());
+}
+
+void MainWindow::saveBaiduTranslationSettings() {
+  QSettings settings;
+  settings.setValue(QStringLiteral("baiduTranslator/appId"), baiduAppIdEdit_->text().trimmed());
+  settings.setValue(QStringLiteral("baiduTranslator/secretKey"), baiduSecretKeyEdit_->text().trimmed());
+  settings.sync();
+  statusBar()->showMessage(QStringLiteral("百度翻译 API 信息已保存"));
+}
+
 void MainWindow::onSubtitlePreparationFinished() {
   openButton_->setEnabled(true);
   cancelSubtitlePreparationButton_->setEnabled(false);
@@ -427,10 +490,11 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
   statusBar()->showMessage(QStringLiteral("请选择任务：直接播放、生成转录字幕或生成翻译字幕"));
 }
 
-void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
+void MainWindow::startSubtitlePreparation(const MediaInfo& info, bool translateAfterTranscription) {
   pendingPlaybackInfo_ = info;
   const int generation = ++subtitlePreparationGeneration_;
   const TranscriptionOptions options = transcriptionOptions();
+  const BaiduTranslationSettings translationSettings = baiduTranslationSettings();
   if (options.modelPath.trimmed().isEmpty()) {
     openButton_->setEnabled(true);
     statusBar()->showMessage(QStringLiteral("未选择转录模型，无法准备字幕"));
@@ -438,13 +502,18 @@ void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
     return;
   }
 
-  transcriptListLabel_->setText(QStringLiteral("正在准备字幕"));
-  statusBar()->showMessage(QStringLiteral("正在准备字幕"));
+  transcriptListLabel_->setText(translateAfterTranscription
+      ? QStringLiteral("正在准备翻译字幕")
+      : QStringLiteral("正在准备转录字幕"));
+  statusBar()->showMessage(translateAfterTranscription
+      ? QStringLiteral("正在准备翻译字幕")
+      : QStringLiteral("正在准备转录字幕"));
   setTaskButtonsEnabled(false);
   cancelSubtitlePreparationButton_->setEnabled(true);
   subtitlePreparationCancelRequested_ = std::make_shared<std::atomic_bool>(false);
   const std::shared_ptr<std::atomic_bool> cancelRequested = subtitlePreparationCancelRequested_;
-  subtitlePreparationWatcher_->setFuture(QtConcurrent::run([this, info, options, generation, cancelRequested]() {
+  subtitlePreparationWatcher_->setFuture(QtConcurrent::run(
+      [this, info, options, translationSettings, generation, cancelRequested, translateAfterTranscription]() {
     MediaSubtitlePreparer preparer;
     MediaSubtitlePreparationRequest request;
     request.mediaPath = info.filePath;
@@ -455,7 +524,49 @@ void MainWindow::startSubtitlePreparation(const MediaInfo& info) {
         updateSubtitlePreparationProgress(generation, progress);
       }, Qt::QueuedConnection);
     };
-    return preparer.prepare(request);
+    MediaSubtitlePreparationResult result = preparer.prepare(request);
+    if (!translateAfterTranscription || !result.success || result.canceled) {
+      return result;
+    }
+
+    if (cancelRequested && cancelRequested->load()) {
+      result.success = false;
+      result.canceled = true;
+      result.errorMessage = QStringLiteral("翻译已取消");
+      return result;
+    }
+
+    BaiduTranslator translator;
+    BaiduTranslationRequest translationRequest;
+    translationRequest.sourceTrack = result.subtitleTrack;
+    translationRequest.settings = translationSettings;
+    translationRequest.sourceLanguage = baiduSourceLanguageForWhisperLanguage(options.languageCode);
+    translationRequest.targetLanguage = QStringLiteral("zh");
+    translationRequest.cancelRequested = cancelRequested;
+    translationRequest.progressCallback = [this, generation](const BaiduTranslationProgress& progress) {
+      QMetaObject::invokeMethod(this, [this, generation, progress]() {
+        updateSubtitlePreparationProgress(generation, MediaSubtitlePreparationProgress{
+            MediaSubtitlePreparationStage::Translating,
+            progress.percent,
+            progress.message});
+      }, Qt::QueuedConnection);
+    };
+
+    const BaiduTranslationResult translationResult = translator.translate(translationRequest);
+    if (translationResult.canceled) {
+      result.success = false;
+      result.canceled = true;
+      result.errorMessage = translationResult.errorMessage;
+      return result;
+    }
+    if (!translationResult.success) {
+      result.success = false;
+      result.errorMessage = translationResult.errorMessage;
+      return result;
+    }
+
+    result.subtitleTrack = translationResult.subtitleTrack;
+    return result;
   }));
 }
 
@@ -471,11 +582,16 @@ void MainWindow::startPendingTranscription() {
     return;
   }
 
-  startSubtitlePreparation(pendingPlaybackInfo_);
+  startSubtitlePreparation(pendingPlaybackInfo_, false);
 }
 
 void MainWindow::startPendingTranslation() {
-  statusBar()->showMessage(QStringLiteral("翻译字幕功能将在翻译模型接入后启用"));
+  if (!pendingPlaybackInfo_.hasAudio) {
+    statusBar()->showMessage(QStringLiteral("当前媒体没有音频，无法生成翻译字幕"));
+    return;
+  }
+
+  startSubtitlePreparation(pendingPlaybackInfo_, true);
 }
 
 void MainWindow::cancelSubtitlePreparation() {
@@ -614,6 +730,19 @@ TranscriptionOptions MainWindow::transcriptionOptions() const {
   options.timestampsEnabled = true;
   return options;
 }
+
+BaiduTranslationSettings MainWindow::baiduTranslationSettings() const {
+  BaiduTranslationSettings settings;
+  settings.appId = baiduAppIdEdit_ ? baiduAppIdEdit_->text().trimmed() : QString();
+  settings.secretKey = baiduSecretKeyEdit_ ? baiduSecretKeyEdit_->text().trimmed() : QString();
+  return settings;
+}
+
+#ifdef ECHOTRANS_TESTING
+void MainWindow::setPendingPlaybackInfoForTest(const MediaInfo& info) {
+  pendingPlaybackInfo_ = info;
+}
+#endif
 
 void MainWindow::updatePlaybackStatus() {
   QString fatalError;

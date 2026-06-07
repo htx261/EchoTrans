@@ -5,10 +5,13 @@
 
 #include <QFile>
 #include <QCoreApplication>
+#include <QComboBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSpinBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QSettings>
 #include <QSlider>
 #include <QStatusBar>
 #include <QTemporaryDir>
@@ -104,7 +107,10 @@ private slots:
   void stopsPlaybackWhenMediaOpenFails();
   void displaysSubtitleForCurrentPlaybackPosition();
   void showsTranscriptionOptionsWithDescriptions();
+  void showsBaiduTranslationSettings();
+  void savesBaiduTranslationSettings();
   void showsTaskModeAndCancelControls();
+  void translateButtonStartsTranslationTaskFlow();
   void usesCompactWorkspaceLayout();
 };
 
@@ -311,6 +317,44 @@ void MainWindowTests::showsTranscriptionOptionsWithDescriptions() {
   QVERIFY(!window.findChild<QWidget*>(QStringLiteral("transcriptionWindowSpinBox")));
 }
 
+void MainWindowTests::showsBaiduTranslationSettings() {
+  MainWindow window;
+
+  auto* appIdEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduAppIdEdit"));
+  auto* secretKeyEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduSecretKeyEdit"));
+  auto* saveButton = window.findChild<QPushButton*>(QStringLiteral("saveBaiduSettingsButton"));
+  auto* description = window.findChild<QLabel*>(QStringLiteral("baiduTranslationDescription"));
+
+  QVERIFY(appIdEdit);
+  QVERIFY(secretKeyEdit);
+  QVERIFY(saveButton);
+  QVERIFY(description);
+  QVERIFY(description->text().contains(QStringLiteral("百度")));
+}
+
+void MainWindowTests::savesBaiduTranslationSettings() {
+  QCoreApplication::setOrganizationName(QStringLiteral("EchoTransTests"));
+  QCoreApplication::setApplicationName(QStringLiteral("MainWindowBaiduSettings"));
+  QSettings().clear();
+
+  MainWindow window;
+  auto* appIdEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduAppIdEdit"));
+  auto* secretKeyEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduSecretKeyEdit"));
+  auto* saveButton = window.findChild<QPushButton*>(QStringLiteral("saveBaiduSettingsButton"));
+  QVERIFY(appIdEdit);
+  QVERIFY(secretKeyEdit);
+  QVERIFY(saveButton);
+
+  appIdEdit->setText(QStringLiteral("test-app-id"));
+  secretKeyEdit->setText(QStringLiteral("test-secret-key"));
+  QTest::mouseClick(saveButton, Qt::LeftButton);
+
+  QSettings settings;
+  QCOMPARE(settings.value(QStringLiteral("baiduTranslator/appId")).toString(), QStringLiteral("test-app-id"));
+  QCOMPARE(settings.value(QStringLiteral("baiduTranslator/secretKey")).toString(), QStringLiteral("test-secret-key"));
+  settings.clear();
+}
+
 void MainWindowTests::showsTaskModeAndCancelControls() {
   MainWindow window;
 
@@ -327,6 +371,32 @@ void MainWindowTests::showsTaskModeAndCancelControls() {
   QVERIFY(!transcribeButton->isEnabled());
   QVERIFY(!translateButton->isEnabled());
   QVERIFY(!cancelButton->isEnabled());
+}
+
+void MainWindowTests::translateButtonStartsTranslationTaskFlow() {
+  MainWindow window;
+
+  MediaInfo info;
+  info.filePath = QStringLiteral("Z:/missing/media.mp4");
+  info.hasAudio = true;
+  window.setPendingPlaybackInfoForTest(info);
+
+  auto* modelComboBox = window.findChild<QComboBox*>(QStringLiteral("transcriptionModelComboBox"));
+  auto* translateButton = window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton"));
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton"));
+  QVERIFY(modelComboBox);
+  QVERIFY(translateButton);
+  QVERIFY(cancelButton);
+
+  modelComboBox->clear();
+  modelComboBox->addItem(QStringLiteral("missing.bin"), QStringLiteral("Z:/missing/ggml-base.bin"));
+  translateButton->setEnabled(true);
+
+  QTest::mouseClick(translateButton, Qt::LeftButton);
+
+  QVERIFY(cancelButton->isEnabled());
+  QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("翻译字幕")));
+  QTRY_VERIFY_WITH_TIMEOUT(window.statusBar()->currentMessage().contains(QStringLiteral("失败")), 3000);
 }
 
 void MainWindowTests::usesCompactWorkspaceLayout() {

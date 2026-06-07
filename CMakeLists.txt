@@ -16,7 +16,24 @@ set(CMAKE_AUTOUIC ON)
 
 include(cmake/EchoTransDependencies.cmake)
 
-find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test Multimedia)
+find_package(Qt5 5.12 REQUIRED COMPONENTS Widgets Concurrent Test Multimedia Network)
+
+set(ECHOTRANS_OPENSSL_RUNTIME_DIR
+    ""
+    CACHE PATH "Directory containing OpenSSL 1.1 runtime DLLs for Qt HTTPS")
+
+if(NOT ECHOTRANS_OPENSSL_RUNTIME_DIR)
+  foreach(openssl_candidate
+      "${CMAKE_SOURCE_DIR}/third_party/openssl/bin"
+      "${CMAKE_PREFIX_PATH}/../../Tools/QtCreator/bin")
+    if(EXISTS "${openssl_candidate}/libssl-1_1-x64.dll"
+        AND EXISTS "${openssl_candidate}/libcrypto-1_1-x64.dll")
+      set(ECHOTRANS_OPENSSL_RUNTIME_DIR "${openssl_candidate}" CACHE PATH
+          "Directory containing OpenSSL 1.1 runtime DLLs for Qt HTTPS" FORCE)
+      break()
+    endif()
+  endforeach()
+endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "Build whisper.cpp tests" FORCE)
@@ -40,6 +57,7 @@ add_library(EchoTransCore
   src/transcription/MediaSubtitlePreparer.cpp
   src/transcription/TranscriptionAudioPreprocessor.cpp
   src/transcription/WhisperTranscriber.cpp
+  src/translation/BaiduTranslator.cpp
 )
 
 target_include_directories(EchoTransCore
@@ -53,13 +71,13 @@ target_compile_definitions(EchoTransCore
   PUBLIC
     ECHOTRANS_FFMPEG_ROOT="${ECHOTRANS_FFMPEG_ROOT}"
     ECHOTRANS_WHISPER_ROOT="${ECHOTRANS_WHISPER_ROOT}"
-    ECHOTRANS_CTRANSLATE2_ROOT="${ECHOTRANS_CTRANSLATE2_ROOT}"
     ECHOTRANS_MODELS_ROOT="${ECHOTRANS_MODELS_ROOT}"
 )
 
 target_link_libraries(EchoTransCore
   PUBLIC
     Qt5::Core
+    Qt5::Network
   PRIVATE
     ${ECHOTRANS_FFMPEG_LIBRARIES}
     whisper
@@ -109,6 +127,23 @@ function(echotrans_copy_ffmpeg_runtime target_name)
   )
 endfunction()
 
+function(echotrans_copy_openssl_runtime target_name)
+  if(ECHOTRANS_OPENSSL_RUNTIME_DIR
+      AND EXISTS "${ECHOTRANS_OPENSSL_RUNTIME_DIR}/libssl-1_1-x64.dll"
+      AND EXISTS "${ECHOTRANS_OPENSSL_RUNTIME_DIR}/libcrypto-1_1-x64.dll")
+    add_custom_command(TARGET ${target_name} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${ECHOTRANS_OPENSSL_RUNTIME_DIR}/libssl-1_1-x64.dll"
+          "$<TARGET_FILE_DIR:${target_name}>"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${ECHOTRANS_OPENSSL_RUNTIME_DIR}/libcrypto-1_1-x64.dll"
+          "$<TARGET_FILE_DIR:${target_name}>"
+    )
+  else()
+    message(WARNING "OpenSSL 1.1 runtime DLLs were not found. HTTPS translation requests may fail.")
+  endif()
+endfunction()
+
 add_executable(EchoTrans
   src/app/main.cpp
   src/ui/MainWindow.cpp
@@ -124,6 +159,7 @@ target_link_libraries(EchoTrans
 )
 
 echotrans_copy_ffmpeg_runtime(EchoTrans)
+echotrans_copy_openssl_runtime(EchoTrans)
 
 add_executable(DependencyReportTests
   tests/core/DependencyReportTests.cpp
@@ -243,6 +279,21 @@ target_link_libraries(MediaPlayerCoreTests
 
 echotrans_copy_ffmpeg_runtime(MediaPlayerCoreTests)
 
+add_executable(BaiduTranslatorTests
+  tests/translation/BaiduTranslatorTests.cpp
+)
+
+target_include_directories(BaiduTranslatorTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(BaiduTranslatorTests
+  PRIVATE
+    EchoTransCore
+    Qt5::Test
+)
+
 add_executable(VideoFrameSynchronizerTests
   tests/player/VideoFrameSynchronizerTests.cpp
 )
@@ -268,12 +319,18 @@ target_include_directories(MainWindowTests
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(MainWindowTests
+  PRIVATE
+    ECHOTRANS_TESTING
+)
+
 target_link_libraries(MainWindowTests
   PRIVATE
     EchoTransCore
     EchoTransMedia
     EchoTransPlayer
     Qt5::Concurrent
+    Qt5::Network
     Qt5::Test
     Qt5::Widgets
 )
@@ -288,6 +345,7 @@ add_test(NAME SubtitleTrackTests COMMAND SubtitleTrackTests)
 add_test(NAME WhisperTranscriberTests COMMAND WhisperTranscriberTests)
 add_test(NAME TranscriptionAudioPreprocessorTests COMMAND TranscriptionAudioPreprocessorTests)
 add_test(NAME MediaSubtitlePreparerTests COMMAND MediaSubtitlePreparerTests)
+add_test(NAME BaiduTranslatorTests COMMAND BaiduTranslatorTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
 add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)
