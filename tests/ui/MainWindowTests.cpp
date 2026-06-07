@@ -11,6 +11,7 @@
 #include <QSpinBox>
 #include <QProcess>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSlider>
 #include <QStatusBar>
@@ -109,7 +110,14 @@ private slots:
   void showsTranscriptionOptionsWithDescriptions();
   void showsBaiduTranslationSettings();
   void savesBaiduTranslationSettings();
+  void switchesTranslationSettingsByTaskType();
+  void importsWhisperModelAtRuntime();
+  void liveInterpretationModeShowsAccuracyWarning();
+  void liveInterpretationStartsPlaybackBeforeSubtitlesFinish();
   void showsTaskModeAndCancelControls();
+  void placesPlaybackControlsBelowVideo();
+  void overlaysSubtitleOnVideo();
+  void constrainsGrowingSubtitleText();
   void translateButtonStartsTranslationTaskFlow();
   void usesCompactWorkspaceLayout();
 };
@@ -355,22 +363,162 @@ void MainWindowTests::savesBaiduTranslationSettings() {
   settings.clear();
 }
 
+void MainWindowTests::switchesTranslationSettingsByTaskType() {
+  MainWindow window;
+
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* translationSettingsPanel = window.findChild<QWidget*>(QStringLiteral("translationSettingsPanel"));
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(startTaskButton);
+  QVERIFY(translationSettingsPanel);
+
+  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("transcribe"));
+  QVERIFY(translationSettingsPanel->isHidden());
+
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("translate")));
+  QVERIFY(!translationSettingsPanel->isHidden());
+}
+
+void MainWindowTests::liveInterpretationModeShowsAccuracyWarning() {
+  MainWindow window;
+
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* translationSettingsPanel = window.findChild<QWidget*>(QStringLiteral("translationSettingsPanel"));
+  auto* liveDescription = window.findChild<QLabel*>(QStringLiteral("liveInterpretationDescription"));
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(translationSettingsPanel);
+  QVERIFY(liveDescription);
+
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
+
+  QVERIFY(!translationSettingsPanel->isHidden());
+  QVERIFY(!liveDescription->isHidden());
+  QVERIFY(liveDescription->text().contains(QStringLiteral("不如预处理字幕")));
+}
+
+void MainWindowTests::liveInterpretationStartsPlaybackBeforeSubtitlesFinish() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString mediaPath = writeTestAudioVideoFile(dir.filePath(QStringLiteral("sample.avi")), 3);
+  QVERIFY(!mediaPath.isEmpty());
+  const QString modelPath = dir.filePath(QStringLiteral("fake-model.bin"));
+  QFile modelFile(modelPath);
+  QVERIFY(modelFile.open(QIODevice::WriteOnly));
+  modelFile.write("fake model");
+  modelFile.close();
+
+  MainWindow window;
+
+  MediaInfo info;
+  info.filePath = mediaPath;
+  info.durationMs = 3000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+  window.setPendingPlaybackInfoForTest(info);
+
+  auto* modelComboBox = window.findChild<QComboBox*>(QStringLiteral("transcriptionModelComboBox"));
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelTaskButton"));
+  QVERIFY(modelComboBox);
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(startTaskButton);
+  QVERIFY(cancelButton);
+
+  modelComboBox->clear();
+  modelComboBox->addItem(QStringLiteral("fake-model.bin"), modelPath);
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
+  startTaskButton->setEnabled(true);
+
+  QTest::mouseClick(startTaskButton, Qt::LeftButton);
+
+  QCOMPARE(window.playbackState(), PlaybackState::Playing);
+  QVERIFY(cancelButton->isEnabled());
+}
+
+void MainWindowTests::importsWhisperModelAtRuntime() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString sourcePath = dir.filePath(QStringLiteral("ggml-test-import.bin"));
+  QFile sourceFile(sourcePath);
+  QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+  sourceFile.write("test model");
+  sourceFile.close();
+
+  MainWindow window;
+  QVERIFY(window.importWhisperModelForTest(sourcePath));
+
+  auto* modelComboBox = window.findChild<QComboBox*>(QStringLiteral("transcriptionModelComboBox"));
+  QVERIFY(modelComboBox);
+
+  const QString importedPath = modelComboBox->currentData().toString();
+  QVERIFY(importedPath.endsWith(QStringLiteral("ggml-test-import.bin")));
+  QVERIFY(QFile::exists(importedPath));
+  QFile::remove(importedPath);
+}
+
 void MainWindowTests::showsTaskModeAndCancelControls() {
   MainWindow window;
 
   auto* directPlayButton = window.findChild<QPushButton*>(QStringLiteral("directPlayButton"));
-  auto* transcribeButton = window.findChild<QPushButton*>(QStringLiteral("transcribeButton"));
-  auto* translateButton = window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton"));
-  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton"));
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelTaskButton"));
 
   QVERIFY(directPlayButton);
-  QVERIFY(transcribeButton);
-  QVERIFY(translateButton);
+  QVERIFY(startTaskButton);
   QVERIFY(cancelButton);
+  QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("transcribeButton")));
+  QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton")));
+  QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton")));
   QVERIFY(!directPlayButton->isEnabled());
-  QVERIFY(!transcribeButton->isEnabled());
-  QVERIFY(!translateButton->isEnabled());
+  QVERIFY(!startTaskButton->isEnabled());
   QVERIFY(!cancelButton->isEnabled());
+}
+
+void MainWindowTests::placesPlaybackControlsBelowVideo() {
+  MainWindow window;
+
+  auto* playbackControls = window.findChild<QWidget*>(QStringLiteral("playbackControls"));
+  auto* pauseButton = window.findChild<QPushButton*>(QStringLiteral("pauseButton"));
+  auto* stopButton = window.findChild<QPushButton*>(QStringLiteral("stopButton"));
+  auto* videoContainer = window.findChild<QWidget*>(QStringLiteral("videoContainer"));
+  QVERIFY(playbackControls);
+  QVERIFY(pauseButton);
+  QVERIFY(stopButton);
+  QVERIFY(videoContainer);
+  QCOMPARE(pauseButton->parentWidget(), playbackControls);
+  QCOMPARE(stopButton->parentWidget(), playbackControls);
+}
+
+void MainWindowTests::overlaysSubtitleOnVideo() {
+  MainWindow window;
+
+  auto* subtitleLabel = window.findChild<QLabel*>(QStringLiteral("subtitleLabel"));
+  auto* videoContainer = window.findChild<QWidget*>(QStringLiteral("videoContainer"));
+  QVERIFY(subtitleLabel);
+  QVERIFY(videoContainer);
+  QCOMPARE(subtitleLabel->parentWidget(), videoContainer);
+  QVERIFY(subtitleLabel->styleSheet().contains(QStringLiteral("rgba")));
+  QVERIFY(subtitleLabel->styleSheet().contains(QStringLiteral("color: white")));
+}
+
+void MainWindowTests::constrainsGrowingSubtitleText() {
+  MainWindow window;
+
+  auto* subtitleLabel = window.findChild<QLabel*>(QStringLiteral("subtitleLabel"));
+  auto* transcriptScrollArea = window.findChild<QScrollArea*>(QStringLiteral("transcriptScrollArea"));
+  auto* transcriptListLabel = window.findChild<QLabel*>(QStringLiteral("transcriptListLabel"));
+  QVERIFY(subtitleLabel);
+  QVERIFY(transcriptScrollArea);
+  QVERIFY(transcriptListLabel);
+
+  QVERIFY(subtitleLabel->maximumHeight() > 0);
+  QVERIFY(subtitleLabel->maximumHeight() <= 96);
+  QCOMPARE(transcriptScrollArea->widget(), transcriptListLabel);
+  QCOMPARE(transcriptScrollArea->widgetResizable(), true);
 }
 
 void MainWindowTests::translateButtonStartsTranslationTaskFlow() {
@@ -382,17 +530,20 @@ void MainWindowTests::translateButtonStartsTranslationTaskFlow() {
   window.setPendingPlaybackInfoForTest(info);
 
   auto* modelComboBox = window.findChild<QComboBox*>(QStringLiteral("transcriptionModelComboBox"));
-  auto* translateButton = window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton"));
-  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton"));
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelTaskButton"));
   QVERIFY(modelComboBox);
-  QVERIFY(translateButton);
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(startTaskButton);
   QVERIFY(cancelButton);
 
   modelComboBox->clear();
   modelComboBox->addItem(QStringLiteral("missing.bin"), QStringLiteral("Z:/missing/ggml-base.bin"));
-  translateButton->setEnabled(true);
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("translate")));
+  startTaskButton->setEnabled(true);
 
-  QTest::mouseClick(translateButton, Qt::LeftButton);
+  QTest::mouseClick(startTaskButton, Qt::LeftButton);
 
   QVERIFY(cancelButton->isEnabled());
   QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("翻译字幕")));
@@ -404,7 +555,7 @@ void MainWindowTests::usesCompactWorkspaceLayout() {
 
   QVERIFY(window.findChild<QWidget*>(QStringLiteral("topToolbar")));
   QVERIFY(window.findChild<QWidget*>(QStringLiteral("mainWorkspace")));
-  QVERIFY(window.findChild<QWidget*>(QStringLiteral("currentSubtitlePanel")));
+  QVERIFY(window.findChild<QWidget*>(QStringLiteral("videoContainer")));
   QVERIFY(window.findChild<QWidget*>(QStringLiteral("transcriptPanel")));
 
   const auto labels = window.findChildren<QLabel*>();

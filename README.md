@@ -1,58 +1,139 @@
 # EchoTrans
 
-EchoTrans 是一款基于 C++ 和 Qt 的 AI 同声传译助手，面向外语演讲、技术分享、国际会议和网课场景。项目通过语音识别和本地翻译模型，将单向音频流实时转换为中文字幕，帮助用户降低语言门槛并跟上内容节奏。
+EchoTrans 是一款基于 C++ 和 Qt 的 AI 同声传译助手，面向外语演讲、技术分享、国际会议和网课场景。项目使用 FFmpeg 播放和解码本地媒体文件，使用 whisper.cpp 对音频进行本地转录，并通过百度翻译 API 生成中文字幕。
 
-第一版以字幕为主，不包含中文语音播报。系统会区分临时字幕和确认字幕，使最近的识别或翻译结果可以被自动修正。
+当前版本以字幕呈现为主，不包含中文语音播报。
 
 ## 功能目标
 
-- 播放本地音视频文件。
-- 基于 FFmpeg 解码媒体并抽取音频。
-- 基于 whisper.cpp 自动识别音频语言并转录原文。
-- 基于 CTranslate2 + NLLB 将原文翻译为简体中文。
-- 在播放器中显示当前中文字幕。
-- 在字幕历史区展示原文和译文。
-- 支持临时字幕和确认字幕。
-- 支持识别或翻译结果自动修正。
-- 支持导出双语 SRT 字幕。
+- 打开并播放本地音视频文件。
+- 基于 FFmpeg 实现解封装、音频解码、视频解码和播放。
+- 基于 whisper.cpp 将音频转录为原文字幕。
+- 通过百度翻译 API 将原文字幕翻译为中文字幕。
+- 在播放器中显示当前字幕。
+- 在字幕区域展示转录和翻译结果。
+- 支持预处理字幕任务：先生成字幕，再进入播放。
+- 支持同声传译实验模式：先开始播放，再在后台生成并回填转录和翻译字幕。
+- 支持播放控制：暂停、继续、停止、点击跳转和拖拽跳转。
+- 支持用户自行配置百度翻译 APP ID 和密钥。
+- 支持在程序中导入 whisper.cpp 的 ggml `.bin` 模型文件。
 
 ## 技术栈
 
-- C++
-- Qt Widgets
+- C++17
+- Qt 5.12.12，MSVC 2017 64-bit Kit
 - CMake
 - Visual Studio
 - FFmpeg
 - whisper.cpp
-- CTranslate2
-- NLLB 翻译模型
+- 百度翻译开放平台 API
 
-## 第三方库和模型获取
+## 第三方库和模型
 
-第三方库和模型文件体积较大，不提交到 Git 仓库。请从项目的 GitHub Releases 页面下载资源包。
+第三方库和模型文件体积较大，不提交到 Git 仓库。请从项目的 GitHub Releases 页面下载资源包，或按相同目录结构自行准备。
 
-资源包名称：
-
-```text
-EchoTrans-Resources.zip
-```
-
-下载后将资源包解压到项目根目录，解压后的目录结构应为：
+资源包解压后，项目根目录应包含：
 
 ```text
 EchoTrans/
   third_party/
     ffmpeg/
+    openssl/
     whisper.cpp/
-    ctranslate2/
 
   models/
     whisper/
-    translation/
-    tokenizers/
 ```
 
-解压后仍需保证 `third_party/` 和 `models/` 位于项目根目录。
+其中：
+
+- `third_party/ffmpeg`：FFmpeg 开发包，需包含 `include/`、`lib/`、`bin/`。
+- `third_party/openssl`：OpenSSL 1.1 运行时，需包含 `bin/libssl-1_1-x64.dll` 和 `bin/libcrypto-1_1-x64.dll`。
+- `third_party/whisper.cpp`：whisper.cpp 源码目录。
+- `models/whisper`：whisper.cpp 使用的 `.bin` 模型文件，例如 `ggml-small.bin`。
+
+当前版本不再需要 CTranslate2、NLLB 翻译模型或 tokenizer。
+
+## whisper 模型
+
+EchoTrans 使用 whisper.cpp 的 ggml `.bin` 模型进行本地转录。模型可以通过两种方式准备：
+
+1. 将模型文件直接放入项目根目录下的 `models/whisper/`。
+2. 启动程序后，在“源字幕设置”中点击“导入模型”，选择本地 `.bin` 文件。程序会将该模型复制到 `models/whisper/` 并自动选中。
+
+whisper.cpp 官方 ggml 模型下载源：
+
+```text
+https://huggingface.co/ggerganov/whisper.cpp/tree/main
+```
+
+常用模型文件示例：
+
+```text
+ggml-base.bin
+ggml-small.bin
+ggml-medium.bin
+```
+
+模型越大，通常识别效果越好，但转录速度和内存占用也会更高。实际演示建议优先使用 Release 版本运行。
+
+## Qt 开发环境
+
+项目使用 Qt Widgets 开发，推荐使用以下 Qt 版本和构建 Kit：
+
+```text
+Qt 版本：Qt 5.12.12
+构建 Kit：msvc2017_64
+编译器：Visual Studio MSVC x64
+```
+
+Windows 上的 Qt 路径示例：
+
+```text
+D:\SoftWare\Qt\Qt5.12.12\5.12.12\msvc2017_64
+```
+
+该目录下应包含：
+
+```text
+bin/
+include/
+lib/
+lib/cmake/Qt5/
+```
+
+Qt 官方归档下载入口：
+
+```text
+https://download.qt.io/archive/qt/5.12/5.12.12/
+```
+
+也可以使用 Qt 在线安装器，在安装组件时选择：
+
+```text
+Qt 5.12.12 -> MSVC 2017 64-bit
+```
+
+## 百度翻译 API
+
+翻译功能使用用户自己的百度翻译开放平台账号。启动程序后，在界面右侧“翻译设置”中填写：
+
+```text
+APP ID
+密钥
+```
+
+点击“保存翻译设置”后，再选择“生成翻译字幕”。
+
+如果百度返回 `54003 访问频率受限`，程序会等待 3 秒后自动重试一次。程序会将 8 条字幕合并为一批请求，并在批次之间等待 1 秒，以降低触发频率限制的概率。
+
+## 字幕任务模式
+
+打开媒体文件后，可以选择不同的字幕任务：
+
+- `仅生成字幕`：使用 whisper.cpp 生成原文字幕，不进行翻译。
+- `生成字幕并翻译`：先完成转录和翻译，再开始播放。该模式时间轴更稳定，适合正式演示和需要较高准确度的场景。
+- `同声传译（实验）`：先开始播放，同时在后台进行转录和翻译，字幕生成后会回填到当前播放中。该模式响应更快，但由于不是完整预处理，识别准确度、翻译稳定性和时间对齐效果可能不如预处理字幕。
 
 ## 从源码构建
 
@@ -63,41 +144,99 @@ git clone https://github.com/htx261/EchoTrans.git
 cd EchoTrans
 ```
 
-### 2. 解压资源包
+### 2. 准备资源目录
 
-从 GitHub Releases 下载资源包，并解压到项目根目录。解压后应能看到：
+下载资源包并解压到项目根目录，或手动准备：
 
 ```text
 third_party/
+  ffmpeg/
+  openssl/
+  whisper.cpp/
+
 models/
+  whisper/
 ```
 
 ### 3. 配置 CMake
 
-将 `<Qt-MSVC-Prefix-Path>` 替换为本机 Qt MSVC 安装路径，例如 Qt 安装目录下包含 `lib/cmake/Qt5` 的那一级目录。
+将 `<Qt-MSVC-Prefix-Path>` 替换为 Qt 5.12.12 MSVC 2017 64-bit Kit 的安装路径，也就是包含 `lib/cmake/Qt5` 的目录。
 
-```powershell
-cmake -S . -B build -DCMAKE_PREFIX_PATH=<Qt-MSVC-Prefix-Path>
+路径示例：
+
+```text
+D:\SoftWare\Qt\Qt5.12.12\5.12.12\msvc2017_64
 ```
 
-### 4. 构建
+配置命令：
 
 ```powershell
-cmake --build build --config Debug
+cmake -S . -B build-qt5 -DCMAKE_PREFIX_PATH=<Qt-MSVC-Prefix-Path>
 ```
 
-### 5. 运行程序
+例如：
 
 ```powershell
-start .\build\Debug\EchoTrans.exe
+cmake -S . -B build-qt5 -DCMAKE_PREFIX_PATH=D:\SoftWare\Qt\Qt5.12.12\5.12.12\msvc2017_64
 ```
 
-如果运行测试或程序时提示找不到 Qt DLL，请将本机 Qt `bin` 目录加入当前 PowerShell 会话的 `PATH`：
+### 4. 构建 Debug
+
+Debug 版本适合开发和调试：
 
 ```powershell
-$env:PATH="<Qt-Bin-Path>;" + $env:PATH
+cmake --build build-qt5 --config Debug --target EchoTrans
 ```
+
+运行：
+
+```powershell
+.\build-qt5\Debug\EchoTrans.exe
+```
+
+### 5. 构建 Release
+
+Release 版本适合实际演示和转录任务：
+
+```powershell
+cmake --build build-qt5 --config Release --target EchoTrans
+```
+
+运行：
+
+```powershell
+.\build-qt5\Release\EchoTrans.exe
+```
+
+## Debug 与 Release 的区别
+
+whisper.cpp 和 ggml 在 Debug 构建下没有 Release 级别的编译优化，转录速度会明显变慢，尤其是较长音视频文件。Debug 版本主要用于调试 UI、播放流程和单元测试。
+
+实际体验、演示和字幕生成建议使用 Release 版本：
+
+```powershell
+cmake --build build-qt5 --config Release --target EchoTrans
+.\build-qt5\Release\EchoTrans.exe
+```
+
+## HTTPS 和 OpenSSL
+
+百度翻译 API 使用 HTTPS。Qt 5.12 在 Windows 下需要 OpenSSL 1.1 运行时 DLL：
+
+```text
+libssl-1_1-x64.dll
+libcrypto-1_1-x64.dll
+```
+
+CMake 会优先从以下位置查找并复制到程序目录：
+
+```text
+third_party/openssl/bin
+QtCreator/bin
+```
+
+资源包应提供 `third_party/openssl/bin`。如果运行时出现 `TLS initialization failed`，请确认上述两个 DLL 与 `EchoTrans.exe` 位于同一目录。
 
 ## 第三方许可
 
-本项目使用 FFmpeg、whisper.cpp、CTranslate2 和 NLLB 模型。第三方库和模型需遵守各自许可证。NLLB-200 distilled 600M 使用非商业许可，如果后续用于商业化场景，需要重新确认授权或更换合适模型。
+本项目使用 FFmpeg、whisper.cpp、Qt 和百度翻译开放平台 API。第三方库、模型和在线服务需遵守各自许可证、服务条款和计费规则。
