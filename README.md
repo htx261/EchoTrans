@@ -6,6 +6,8 @@ EchoTrans 是一款基于 C++ 和 Qt 的 AI 同声传译助手，面向外语演
 
 视频demo地址：https://www.bilibili.com/video/BV1BJEh6vEDr/?vd_source=00028718da1d817f1c957b12e3d3d0ab
 
+按照完整的构建命令编译项目后，如果右上角提示依赖异常不影响使用，导入模型即可
+
 ## 功能目标
 
 - 打开并播放本地音视频文件。
