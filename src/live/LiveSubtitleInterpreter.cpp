@@ -4,7 +4,13 @@
 #include <QThread>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cmath>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <utility>
 
 namespace {
 struct LiveAudioChunk {
@@ -14,6 +20,7 @@ struct LiveAudioChunk {
   int sampleRate = 16000;
   int channelCount = 1;
   QVector<float> samples;
+  bool stable = false;
   bool endOfStream = false;
 };
 
@@ -187,7 +194,7 @@ public:
 
   void appendEndOfStream() {
     if (totalSamplesSeen_ > 0 && totalSamplesSeen_ != lastEmittedEndSample_) {
-      emitWindow(totalSamplesSeen_);
+      emitWindow(totalSamplesSeen_, true);
     }
 
     LiveAudioChunk endChunk;
@@ -243,12 +250,12 @@ private:
 
   void emitReadyWindows() {
     while (totalSamplesSeen_ >= nextEmitEndSample_) {
-      emitWindow(nextEmitEndSample_);
+      emitWindow(nextEmitEndSample_, false);
       nextEmitEndSample_ += stepSamples_;
     }
   }
 
-  void emitWindow(qint64 windowEndSample) {
+  void emitWindow(qint64 windowEndSample, bool forceStable) {
     const qint64 windowStartSample = bufferStartSample_;
     const qint64 relativeStart = windowStartSample - bufferStartSample_;
     const qint64 relativeEnd = windowEndSample - bufferStartSample_;
@@ -265,11 +272,14 @@ private:
     chunk.samples = samples_.mid(
         static_cast<int>(relativeStart),
         static_cast<int>(relativeEnd - relativeStart));
+
+    const bool stable = forceStable || chunksInBlock_ + 1 >= chunksPerBlock_;
+    chunk.stable = stable;
     readyChunks_.push_back(std::move(chunk));
     lastEmittedEndSample_ = windowEndSample;
 
     ++chunksInBlock_;
-    if (chunksInBlock_ >= chunksPerBlock_) {
+    if (stable) {
       const qint64 pruneBeforeSample = std::max<qint64>(0, windowEndSample - keepSamples_);
       pruneBefore(pruneBeforeSample);
       blockDisplayStartSample_ = windowEndSample;
@@ -308,6 +318,196 @@ private:
   bool hasStartPts_ = false;
   QVector<float> samples_;
   QVector<LiveAudioChunk> readyChunks_;
+};
+
+class LiveTranslationDispatcher {
+public:
+  using TranslateTrack = std::function<BaiduTranslationResult(const BaiduTranslationRequest&)>;
+  using EmitSegment = std::function<void(const SubtitleSegment&)>;
+
+  LiveTranslationDispatcher(
+      const LiveSubtitleInterpreterRequest& request,
+      TranslateTrack translateTrack,
+      EmitSegment emitSegment)
+      : request_(request),
+        translateTrack_(std::move(translateTrack)),
+        emitSegment_(std::move(emitSegment)) {
+    worker_ = std::thread([this]() {
+      run();
+    });
+  }
+
+  ~LiveTranslationDispatcher() {
+    cancelPending();
+  }
+
+  LiveTranslationDispatcher(const LiveTranslationDispatcher&) = delete;
+  LiveTranslationDispatcher& operator=(const LiveTranslationDispatcher&) = delete;
+
+  void queueLatest(const SubtitleSegment& segment) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (failed_ || canceled_) {
+        return;
+      }
+      pendingSegment_ = segment;
+      hasPendingSegment_ = true;
+    }
+    condition_.notify_one();
+  }
+
+  bool finish() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+      drainPendingOnStop_ = true;
+    }
+    condition_.notify_one();
+    joinWorker();
+    return !hasTerminalResult();
+  }
+
+  void cancelPending() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+      drainPendingOnStop_ = false;
+      hasPendingSegment_ = false;
+    }
+    condition_.notify_one();
+    joinWorker();
+  }
+
+  bool hasTerminalResult() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return failed_ || canceled_;
+  }
+
+  bool canceled() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return canceled_;
+  }
+
+  QString errorMessage() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return errorMessage_;
+  }
+
+private:
+  void joinWorker() {
+    if (worker_.joinable()) {
+      worker_.join();
+    }
+  }
+
+  void run() {
+    QElapsedTimer timer;
+    timer.start();
+    qint64 lastTranslationStartMs = -1;
+
+    while (true) {
+      SubtitleSegment sourceSegment;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this]() {
+          return hasPendingSegment_ || stopping_ || isCanceled(request_);
+        });
+
+        if (isCanceled(request_)) {
+          canceled_ = true;
+          hasPendingSegment_ = false;
+          return;
+        }
+
+        if (stopping_ && !drainPendingOnStop_) {
+          hasPendingSegment_ = false;
+          return;
+        }
+
+        if (stopping_ && !hasPendingSegment_) {
+          return;
+        }
+
+        while (!(stopping_ && drainPendingOnStop_)
+            && lastTranslationStartMs >= 0
+            && request_.translationIntervalMs > 0
+            && timer.elapsed() - lastTranslationStartMs < request_.translationIntervalMs) {
+          const qint64 waitMs = request_.translationIntervalMs
+              - (timer.elapsed() - lastTranslationStartMs);
+          condition_.wait_for(lock, std::chrono::milliseconds(std::max<qint64>(1, waitMs)));
+
+          if (isCanceled(request_)) {
+            canceled_ = true;
+            hasPendingSegment_ = false;
+            return;
+          }
+          if (stopping_ && !drainPendingOnStop_) {
+            hasPendingSegment_ = false;
+            return;
+          }
+          if (stopping_ && !hasPendingSegment_) {
+            return;
+          }
+        }
+
+        if (!hasPendingSegment_) {
+          continue;
+        }
+
+        sourceSegment = pendingSegment_;
+        hasPendingSegment_ = false;
+        lastTranslationStartMs = timer.elapsed();
+      }
+
+      reportProgress(
+          request_,
+          LiveSubtitleInterpreterStage::Translating,
+          QStringLiteral("正在翻译同声传译字幕"));
+
+      QVector<SubtitleSegment> sourceSegments;
+      sourceSegments.push_back(sourceSegment);
+      BaiduTranslationRequest translationRequest;
+      translationRequest.sourceTrack = trackFromSegments(sourceSegments);
+      translationRequest.settings = request_.translationSettings;
+      translationRequest.sourceLanguage = request_.sourceLanguage;
+      translationRequest.targetLanguage = request_.targetLanguage;
+      translationRequest.cancelRequested = request_.cancelRequested;
+
+      const BaiduTranslationResult translationResult = translateTrack_(translationRequest);
+      if (translationResult.canceled) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        canceled_ = true;
+        hasPendingSegment_ = false;
+        return;
+      }
+      if (!translationResult.success) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        failed_ = true;
+        errorMessage_ = translationResult.errorMessage;
+        hasPendingSegment_ = false;
+        return;
+      }
+
+      const QVector<SubtitleSegment> translatedSegments = translationResult.subtitleTrack.segments();
+      for (const SubtitleSegment& segment : translatedSegments) {
+        emitSegment_(segment);
+      }
+    }
+  }
+
+  const LiveSubtitleInterpreterRequest& request_;
+  TranslateTrack translateTrack_;
+  EmitSegment emitSegment_;
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  std::thread worker_;
+  SubtitleSegment pendingSegment_;
+  bool hasPendingSegment_ = false;
+  bool stopping_ = false;
+  bool drainPendingOnStop_ = false;
+  bool failed_ = false;
+  bool canceled_ = false;
+  QString errorMessage_;
 };
 }
 
@@ -353,64 +553,45 @@ LiveSubtitleInterpreterResult LiveSubtitleInterpreter::run(
       request.streamStepMs,
       request.streamLengthMs,
       request.streamKeepMs);
-  QElapsedTimer translationTimer;
-  translationTimer.start();
-  qint64 lastTranslationMs = -1;
+  std::mutex resultMutex;
   qint64 lastEmittedEndMs = -1;
-  QVector<SubtitleSegment> pendingSourceSegments;
 
   auto emitSegment = [&](const SubtitleSegment& segment) {
-    result.subtitleTrack.upsertSegment(segment);
-    ++result.emittedSegmentCount;
-    lastEmittedEndMs = std::max(lastEmittedEndMs, segment.endMs);
+    {
+      std::lock_guard<std::mutex> lock(resultMutex);
+      result.subtitleTrack.upsertSegment(segment);
+      ++result.emittedSegmentCount;
+      lastEmittedEndMs = std::max(lastEmittedEndMs, segment.endMs);
+    }
     if (request.segmentCallback) {
       request.segmentCallback(segment);
     }
   };
 
-  auto flushPendingTranslations = [&](bool force) -> bool {
-    if (pendingSourceSegments.isEmpty()) {
+  std::unique_ptr<LiveTranslationDispatcher> translationDispatcher;
+  if (request.translateSegments) {
+    translationDispatcher.reset(new LiveTranslationDispatcher(request, translateTrack, emitSegment));
+  }
+
+  auto applyTranslationTerminalResult = [&]() {
+    if (!translationDispatcher) {
+      return;
+    }
+    if (translationDispatcher->canceled()) {
+      result.canceled = true;
+      result.errorMessage = QStringLiteral("同声传译已取消");
+      return;
+    }
+    result.errorMessage = translationDispatcher->errorMessage();
+  };
+
+  auto finishTranslations = [&]() -> bool {
+    if (!translationDispatcher) {
       return true;
     }
-
-    if (!force && lastTranslationMs >= 0 && request.translationIntervalMs > 0) {
-      const qint64 elapsed = translationTimer.elapsed() - lastTranslationMs;
-      if (elapsed < request.translationIntervalMs) {
-        return true;
-      }
-    }
-
-    if (isCanceled(request)) {
-      result = canceledResult();
+    if (!translationDispatcher->finish()) {
+      applyTranslationTerminalResult();
       return false;
-    }
-
-    lastTranslationMs = translationTimer.elapsed();
-    reportProgress(
-        request,
-        LiveSubtitleInterpreterStage::Translating,
-        QStringLiteral("正在翻译同声传译字幕 %1 条").arg(pendingSourceSegments.size()));
-
-    BaiduTranslationRequest translationRequest;
-    translationRequest.sourceTrack = trackFromSegments(pendingSourceSegments);
-    translationRequest.settings = request.translationSettings;
-    translationRequest.sourceLanguage = request.sourceLanguage;
-    translationRequest.targetLanguage = request.targetLanguage;
-    translationRequest.cancelRequested = request.cancelRequested;
-    const BaiduTranslationResult translationResult = translateTrack(translationRequest);
-    if (translationResult.canceled) {
-      result = canceledResult();
-      return false;
-    }
-    if (!translationResult.success) {
-      result.errorMessage = translationResult.errorMessage;
-      return false;
-    }
-
-    pendingSourceSegments.clear();
-    const QVector<SubtitleSegment> translatedSegments = translationResult.subtitleTrack.segments();
-    for (const SubtitleSegment& segment : translatedSegments) {
-      emitSegment(segment);
     }
     return true;
   };
@@ -458,8 +639,9 @@ LiveSubtitleInterpreterResult LiveSubtitleInterpreter::run(
         continue;
       }
 
-      pendingSourceSegments.push_back(segment);
-      if (!flushPendingTranslations(false)) {
+      translationDispatcher->queueLatest(segment);
+      if (translationDispatcher->hasTerminalResult()) {
+        applyTranslationTerminalResult();
         return false;
       }
     }
@@ -468,11 +650,16 @@ LiveSubtitleInterpreterResult LiveSubtitleInterpreter::run(
 
   reportProgress(request, LiveSubtitleInterpreterStage::WaitingAudio, QStringLiteral("正在等待同声传译音频"));
   while (!isCanceled(request)) {
+    if (translationDispatcher && translationDispatcher->hasTerminalResult()) {
+      applyTranslationTerminalResult();
+      return result;
+    }
+
     TranscriptionAudioFrame frame;
     if (request.takeAudioFrame(&frame)) {
       if (frame.endOfStream) {
         audioWindow.appendEndOfStream();
-        if (!processReadyChunks() || !flushPendingTranslations(true)) {
+        if (!processReadyChunks() || !finishTranslations()) {
           return result;
         }
         break;
@@ -491,7 +678,7 @@ LiveSubtitleInterpreterResult LiveSubtitleInterpreter::run(
 
     if (request.isPlaybackActive && !request.isPlaybackActive()) {
       audioWindow.appendEndOfStream();
-      if (!processReadyChunks() || !flushPendingTranslations(true)) {
+      if (!processReadyChunks() || !finishTranslations()) {
         return result;
       }
       break;

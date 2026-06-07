@@ -116,6 +116,8 @@ private slots:
   void liveInterpretationStartsPlaybackBeforeSubtitlesFinish();
   void showsLatestLiveSubtitleWhenRecognitionLagsPlayback();
   void showsTaskModeAndCancelControls();
+  void placesOpenFileControlAboveTaskMode();
+  void keepsLastMediaAfterStoppingPlayback();
   void placesPlaybackControlsBelowVideo();
   void overlaysSubtitleOnVideo();
   void constrainsGrowingSubtitleText();
@@ -394,9 +396,9 @@ void MainWindowTests::liveInterpretationModeShowsAccuracyWarning() {
 
   taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
 
-  QVERIFY(translationSettingsPanel->isHidden());
+  QVERIFY(!translationSettingsPanel->isHidden());
   QVERIFY(!liveDescription->isHidden());
-  QVERIFY(liveDescription->text().contains(QStringLiteral("实时转录")));
+  QVERIFY(liveDescription->text().contains(QStringLiteral("实时转录和翻译")));
   QVERIFY(liveDescription->text().contains(QStringLiteral("不如预处理字幕")));
 }
 
@@ -497,6 +499,46 @@ void MainWindowTests::showsTaskModeAndCancelControls() {
   QCOMPARE(cancelButton->parentWidget(), taskOptionsPanel);
   QVERIFY(!startTaskButton->isEnabled());
   QVERIFY(!cancelButton->isEnabled());
+}
+
+void MainWindowTests::placesOpenFileControlAboveTaskMode() {
+  MainWindow window;
+
+  auto* openButton = window.findChild<QPushButton*>(QStringLiteral("openMediaButton"));
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* taskOptionsPanel = window.findChild<QWidget*>(QStringLiteral("taskOptionsPanel"));
+  QVERIFY(openButton);
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(taskOptionsPanel);
+
+  QCOMPARE(openButton->parentWidget(), taskOptionsPanel);
+  QCOMPARE(taskTypeComboBox->parentWidget(), taskOptionsPanel);
+}
+
+void MainWindowTests::keepsLastMediaAfterStoppingPlayback() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeTestAudioVideoFile(dir.filePath(QStringLiteral("remember.avi")), 1);
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.durationMs = 1000;
+  info.hasAudio = true;
+  info.hasVideo = true;
+
+  MainWindow window;
+  window.setPendingPlaybackInfoForTest(info);
+  QVERIFY(window.startPlayback(info));
+  window.stopPlayback();
+
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* mediaInfoLabel = window.findChild<QLabel*>(QStringLiteral("mediaInfoLabel"));
+  QVERIFY(startTaskButton);
+  QVERIFY(mediaInfoLabel);
+  QVERIFY(startTaskButton->isEnabled());
+  QVERIFY(mediaInfoLabel->text().contains(QStringLiteral("remember.avi")));
 }
 
 void MainWindowTests::placesPlaybackControlsBelowVideo() {
