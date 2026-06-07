@@ -20,7 +20,11 @@ ui_*.h
 .venv-model/
 
 # Large local models and tokenizer assets
-models/
+models/*
+!models/.gitkeep
+!models/whisper/
+models/whisper/*
+!models/whisper/.gitkeep
 EchoTrans-Resources/
 EchoTrans-Resources*.zip
 EchoTrans-ThirdParty*.zip
