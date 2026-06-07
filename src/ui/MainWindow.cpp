@@ -4,6 +4,7 @@
 #include "media/FFmpegMediaProbe.h"
 
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -107,6 +108,7 @@ MainWindow::MainWindow(QWidget* parent)
       mediaInfoLabel_(new QLabel(this)),
       timeLabel_(new QLabel(this)),
       seekSlider_(new SeekSlider(this)),
+      useTranslationCheckBox_(new QCheckBox(QStringLiteral("使用翻译"), this)),
       taskTypeComboBox_(new QComboBox(this)),
       transcriptionModelComboBox_(new QComboBox(this)),
       transcriptionLanguageComboBox_(new QComboBox(this)),
@@ -195,6 +197,7 @@ MainWindow::MainWindow(QWidget* parent)
   openButton_->setObjectName(QStringLiteral("openMediaButton"));
   mediaInfoLabel_->setObjectName(QStringLiteral("mediaInfoLabel"));
   pauseButton_->setObjectName(QStringLiteral("pauseButton"));
+  useTranslationCheckBox_->setObjectName(QStringLiteral("useTranslationCheckBox"));
   seekSlider_->setObjectName(QStringLiteral("seekSlider"));
   seekSlider_->setRange(0, 0);
   timeLabel_->setText(QStringLiteral("00:00:00 / 00:00:00"));
@@ -214,9 +217,13 @@ MainWindow::MainWindow(QWidget* parent)
   connect(startTaskButton_, &QPushButton::clicked, this, &MainWindow::startSelectedTask);
   connect(taskTypeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged),
       this, &MainWindow::updateTaskSettingsVisibility);
+  connect(useTranslationCheckBox_, &QCheckBox::toggled,
+      this, &MainWindow::updateTaskSettingsVisibility);
   connect(importWhisperModelButton_, &QPushButton::clicked, this, &MainWindow::importWhisperModel);
   connect(cancelTaskButton_, &QPushButton::clicked, this, &MainWindow::cancelSubtitlePreparation);
   connect(saveBaiduSettingsButton_, &QPushButton::clicked, this, &MainWindow::saveBaiduTranslationSettings);
+  connect(baiduAppIdEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTaskSettingsVisibility);
+  connect(baiduSecretKeyEdit_, &QLineEdit::textChanged, this, &MainWindow::updateTaskSettingsVisibility);
   connect(pauseButton_, &QPushButton::clicked, this, &MainWindow::togglePauseResume);
   connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
@@ -335,18 +342,18 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   groupLayout->addWidget(taskSectionLabel);
   taskTypeComboBox_->setObjectName(QStringLiteral("taskTypeComboBox"));
   taskTypeComboBox_->addItem(QStringLiteral("直接播放"), QStringLiteral("direct_play"));
-  taskTypeComboBox_->addItem(QStringLiteral("仅生成字幕"), QStringLiteral("transcribe"));
-  taskTypeComboBox_->addItem(QStringLiteral("生成字幕并翻译"), QStringLiteral("translate"));
-  taskTypeComboBox_->addItem(QStringLiteral("同声传译（实验）"), QStringLiteral("live_interpretation"));
+  taskTypeComboBox_->addItem(QStringLiteral("预处理字幕"), QStringLiteral("preprocess_subtitle"));
+  taskTypeComboBox_->addItem(QStringLiteral("实时字幕"), QStringLiteral("live_subtitle"));
   groupLayout->addWidget(taskTypeComboBox_);
   groupLayout->addWidget(createOptionDescription(
       QStringLiteral("taskTypeDescription"),
-      QStringLiteral("预处理任务会先准备字幕再播放；同声传译会先播放并在后台生成字幕。"),
+      QStringLiteral("预处理字幕会先生成字幕再播放；实时字幕会边播放边生成字幕。"),
       group));
+  groupLayout->addWidget(useTranslationCheckBox_);
   liveInterpretationDescription_->setObjectName(QStringLiteral("liveInterpretationDescription"));
   liveInterpretationDescription_->setWordWrap(true);
   liveInterpretationDescription_->setText(QStringLiteral(
-      "同声传译会边播放边进行实时转录和翻译，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
+      "实时字幕会边播放边进行转录，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
   QFont liveDescriptionFont = liveInterpretationDescription_->font();
   liveDescriptionFont.setPointSize(std::max(8, liveDescriptionFont.pointSize() - 1));
   liveInterpretationDescription_->setFont(liveDescriptionFont);
@@ -477,15 +484,26 @@ void MainWindow::populateTranscriptionModels() {
 void MainWindow::updateTaskSettingsVisibility() {
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
-      : QStringLiteral("transcribe");
-  const bool translateTask = taskType == QStringLiteral("translate")
-      || taskType == QStringLiteral("live_interpretation");
+      : QStringLiteral("direct_play");
+  const bool subtitleTask = taskType == QStringLiteral("preprocess_subtitle")
+      || taskType == QStringLiteral("live_subtitle");
+  const bool liveTask = taskType == QStringLiteral("live_subtitle");
+  const bool translateTask = subtitleTask && useTranslationForSubtitleTask();
+  if (transcriptionOptionsPanel_) {
+    transcriptionOptionsPanel_->setHidden(!subtitleTask);
+  }
+  if (useTranslationCheckBox_) {
+    useTranslationCheckBox_->setHidden(!subtitleTask);
+    useTranslationCheckBox_->setEnabled(subtitleTask);
+  }
   if (translationSettingsPanel_) {
     translationSettingsPanel_->setHidden(!translateTask);
+    translationSettingsPanel_->setEnabled(translateTask);
   }
   if (liveInterpretationDescription_) {
-    liveInterpretationDescription_->setHidden(taskType != QStringLiteral("live_interpretation"));
+    liveInterpretationDescription_->setHidden(!liveTask);
   }
+  setTaskButtonsEnabled(canStartSelectedTask());
 }
 
 void MainWindow::importWhisperModel() {
@@ -640,7 +658,7 @@ void MainWindow::onSubtitlePreparationFinished() {
   updateSubtitle(currentPositionMs);
   updateTranscriptPanel(currentPositionMs);
   if (updateDuringPlayback) {
-    statusBar()->showMessage(QStringLiteral("同声传译字幕已生成，已应用到当前播放"));
+    statusBar()->showMessage(QStringLiteral("实时字幕已生成，已应用到当前播放"));
     setTaskButtonsEnabled(false);
     return;
   }
@@ -665,7 +683,7 @@ void MainWindow::showMediaInfo(const MediaProbeResult& result) {
   pendingPlaybackInfo_ = info;
   openButton_->setEnabled(true);
   setTaskButtonsEnabled(true);
-  statusBar()->showMessage(QStringLiteral("请选择任务：直接播放、预处理字幕或同声传译"));
+  statusBar()->showMessage(QStringLiteral("请选择任务：直接播放、预处理字幕或实时字幕"));
 }
 
 void MainWindow::startSubtitlePreparation(
@@ -684,9 +702,21 @@ void MainWindow::startSubtitlePreparation(
     transcriptListLabel_->setText(QStringLiteral("未选择转录模型"));
     return;
   }
+  if (translateAfterTranscription) {
+    const BaiduTranslationSettings settings = baiduTranslationSettings();
+    if (settings.appId.trimmed().isEmpty() || settings.secretKey.trimmed().isEmpty()) {
+      openButton_->setEnabled(true);
+      subtitlePreparationUpdatesPlayback_ = false;
+      statusBar()->showMessage(QStringLiteral("启用翻译后需要填写百度翻译 APP ID 和密钥"));
+      transcriptListLabel_->setText(QStringLiteral("翻译设置不完整"));
+      return;
+    }
+  }
 
   const QString taskMessage = updateDuringPlayback
-      ? QStringLiteral("正在同声传译，字幕会在后台生成")
+      ? (translateAfterTranscription
+      ? QStringLiteral("正在生成实时翻译字幕")
+      : QStringLiteral("正在生成实时转录字幕"))
       : (translateAfterTranscription
       ? QStringLiteral("正在准备翻译字幕")
       : QStringLiteral("正在准备转录字幕"));
@@ -769,35 +799,37 @@ void MainWindow::startPendingTranscription() {
     return;
   }
 
-  startSubtitlePreparation(pendingPlaybackInfo_, false);
+  startSubtitlePreparation(pendingPlaybackInfo_, useTranslationForSubtitleTask());
 }
 
-void MainWindow::startPendingTranslation() {
+void MainWindow::startPendingLiveSubtitle() {
   if (!pendingPlaybackInfo_.hasAudio) {
-    statusBar()->showMessage(QStringLiteral("当前媒体没有音频，无法生成翻译字幕"));
-    return;
-  }
-
-  startSubtitlePreparation(pendingPlaybackInfo_, true);
-}
-
-void MainWindow::startPendingLiveInterpretation() {
-  if (!pendingPlaybackInfo_.hasAudio) {
-    statusBar()->showMessage(QStringLiteral("当前媒体没有音频，无法进行同声传译"));
+    statusBar()->showMessage(QStringLiteral("当前媒体没有音频，无法生成实时字幕"));
     return;
   }
 
   if (transcriptionOptions().modelPath.trimmed().isEmpty()) {
-    statusBar()->showMessage(QStringLiteral("未选择转录模型，无法进行同声传译"));
+    statusBar()->showMessage(QStringLiteral("未选择转录模型，无法生成实时字幕"));
     transcriptListLabel_->setText(QStringLiteral("未选择转录模型"));
     return;
   }
 
+  const bool translateSegments = useTranslationForSubtitleTask();
+  if (translateSegments) {
+    const BaiduTranslationSettings settings = baiduTranslationSettings();
+    if (settings.appId.trimmed().isEmpty() || settings.secretKey.trimmed().isEmpty()) {
+      statusBar()->showMessage(QStringLiteral("启用翻译后需要填写百度翻译 APP ID 和密钥"));
+      transcriptListLabel_->setText(QStringLiteral("翻译设置不完整"));
+      return;
+    }
+  }
   subtitleTrack_.setSegments({});
   latestLiveSubtitleText_.clear();
   updateSubtitle(0);
   updateTranscriptPanel(0);
-  statusBar()->showMessage(QStringLiteral("同声传译已开始，字幕会实时显示译文并持续修正"));
+  statusBar()->showMessage(translateSegments
+      ? QStringLiteral("实时字幕已开始，字幕会显示译文并持续修正")
+      : QStringLiteral("实时字幕已开始，字幕会显示转录原文并持续修正"));
   if (!startPlayback(pendingPlaybackInfo_)) {
     return;
   }
@@ -814,7 +846,7 @@ void MainWindow::startPendingLiveInterpretation() {
   const QString sourceLanguage = baiduSourceLanguageForWhisperLanguage(options.languageCode);
 
   subtitlePreparationWatcher_->setFuture(QtConcurrent::run(
-      [this, generation, options, translationSettings, sourceLanguage, cancelRequested]() {
+      [this, generation, options, translationSettings, sourceLanguage, translateSegments, cancelRequested]() {
     LiveSubtitleInterpreter interpreter;
     LiveSubtitleInterpreterRequest request;
     request.options = options;
@@ -825,7 +857,7 @@ void MainWindow::startPendingLiveInterpretation() {
     request.streamLengthMs = 4000;
     request.streamKeepMs = 200;
     request.translationIntervalMs = 100;
-    request.translateSegments = true;
+    request.translateSegments = translateSegments;
     request.cancelRequested = cancelRequested;
     request.takeAudioFrame = [this](TranscriptionAudioFrame* frame) {
       return player_.takeTranscriptionAudioFrame(frame);
@@ -860,6 +892,13 @@ void MainWindow::startPendingLiveInterpretation() {
 }
 
 void MainWindow::startSelectedTask() {
+  if (!canStartSelectedTask()) {
+    statusBar()->showMessage(useTranslationForSubtitleTask()
+        ? QStringLiteral("启用翻译后需要填写百度翻译 APP ID 和密钥")
+        : QStringLiteral("请先打开媒体文件"));
+    return;
+  }
+
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
       : QStringLiteral("direct_play");
@@ -867,12 +906,8 @@ void MainWindow::startSelectedTask() {
     startPendingPlayback();
     return;
   }
-  if (taskType == QStringLiteral("live_interpretation")) {
-    startPendingLiveInterpretation();
-    return;
-  }
-  if (taskType == QStringLiteral("translate")) {
-    startPendingTranslation();
+  if (taskType == QStringLiteral("live_subtitle")) {
+    startPendingLiveSubtitle();
     return;
   }
 
@@ -915,8 +950,31 @@ void MainWindow::cancelSubtitlePreparation() {
 
 void MainWindow::setTaskButtonsEnabled(bool enabled) {
   if (startTaskButton_) {
-    startTaskButton_->setEnabled(enabled);
+    startTaskButton_->setEnabled(enabled && canStartSelectedTask());
   }
+}
+
+bool MainWindow::canStartSelectedTask() const {
+  if (pendingPlaybackInfo_.filePath.trimmed().isEmpty()) {
+    return false;
+  }
+
+  const QString taskType = taskTypeComboBox_
+      ? taskTypeComboBox_->currentData().toString()
+      : QStringLiteral("direct_play");
+  const bool subtitleTask = taskType == QStringLiteral("preprocess_subtitle")
+      || taskType == QStringLiteral("live_subtitle");
+  if (!subtitleTask || !useTranslationForSubtitleTask()) {
+    return true;
+  }
+
+  const BaiduTranslationSettings settings = baiduTranslationSettings();
+  return !settings.appId.trimmed().isEmpty()
+      && !settings.secretKey.trimmed().isEmpty();
+}
+
+bool MainWindow::useTranslationForSubtitleTask() const {
+  return useTranslationCheckBox_ && useTranslationCheckBox_->isChecked();
 }
 
 void MainWindow::showStatusProgress(int percent) {

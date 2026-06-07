@@ -14,6 +14,7 @@
 #include <memory>
 
 class QLabel;
+class QCheckBox;
 class QComboBox;
 class QGroupBox;
 class QLineEdit;
@@ -56,12 +57,13 @@ private:
       bool updateDuringPlayback = false);
   void startPendingPlayback();
   void startPendingTranscription();
-  void startPendingTranslation();
-  void startPendingLiveInterpretation();
+  void startPendingLiveSubtitle();
   void startSelectedTask();
   void appendLiveSubtitleSegment(int generation, const SubtitleSegment& segment);
   void cancelSubtitlePreparation();
   void setTaskButtonsEnabled(bool enabled);
+  bool canStartSelectedTask() const;
+  bool useTranslationForSubtitleTask() const;
   void showStatusProgress(int percent);
   void hideStatusProgress();
   void updateSubtitlePreparationProgress(
@@ -99,6 +101,7 @@ private:
   QLabel* mediaInfoLabel_ = nullptr;
   QLabel* timeLabel_ = nullptr;
   QSlider* seekSlider_ = nullptr;
+  QCheckBox* useTranslationCheckBox_ = nullptr;
   QComboBox* taskTypeComboBox_ = nullptr;
   QComboBox* transcriptionModelComboBox_ = nullptr;
   QComboBox* transcriptionLanguageComboBox_ = nullptr;
