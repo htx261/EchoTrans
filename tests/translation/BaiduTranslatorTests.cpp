@@ -9,6 +9,7 @@ private slots:
   void missingApiSettingsReturnsError();
   void buildsExpectedSign();
   void joinsBatchQueriesWithNewlines();
+  void computesTenQpsThrottleDelay();
 };
 
 void BaiduTranslatorTests::missingApiSettingsReturnsError() {
@@ -47,6 +48,14 @@ void BaiduTranslatorTests::joinsBatchQueriesWithNewlines() {
 
   QCOMPARE(BaiduTranslator::joinBatchQueries(segments, 0, 2), QStringLiteral("Hello\nWorld"));
   QCOMPARE(BaiduTranslator::joinBatchQueries(segments, 1, 3), QStringLiteral("World\nLater"));
+}
+
+void BaiduTranslatorTests::computesTenQpsThrottleDelay() {
+  QCOMPARE(BaiduTranslator::nextRequestDelayMs(-1), 100);
+  QCOMPARE(BaiduTranslator::nextRequestDelayMs(0), 100);
+  QCOMPARE(BaiduTranslator::nextRequestDelayMs(40), 60);
+  QCOMPARE(BaiduTranslator::nextRequestDelayMs(100), 0);
+  QCOMPARE(BaiduTranslator::nextRequestDelayMs(250), 0);
 }
 
 QTEST_MAIN(BaiduTranslatorTests)

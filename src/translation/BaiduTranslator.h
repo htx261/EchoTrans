@@ -50,4 +50,5 @@ public:
       const QString& salt,
       const QString& secretKey);
   static QString joinBatchQueries(const QVector<SubtitleSegment>& segments, int start, int end);
+  static int nextRequestDelayMs(qint64 elapsedSinceLastRequestStartMs);
 };
