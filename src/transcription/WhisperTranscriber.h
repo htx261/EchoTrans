@@ -32,6 +32,17 @@ struct TranscriptionAudioInput {
   QVector<float> samples;
 };
 
+struct TranscriptionRuntimeOptions {
+  bool noContext = false;
+  bool noTimestamps = false;
+  bool singleSegment = false;
+  int maxTokens = -1;
+  int audioContext = 0;
+
+  static TranscriptionRuntimeOptions defaults();
+  static TranscriptionRuntimeOptions streaming();
+};
+
 struct TranscriptionResult {
   bool success = false;
   QString errorMessage;
@@ -52,9 +63,17 @@ public:
   TranscriptionOptions options() const;
   TranscriptionResult transcribe(const TranscriptionAudioInput& audio);
   TranscriptionResult transcribe(
+      const TranscriptionAudioInput& audio,
+      const TranscriptionRuntimeOptions& runtimeOptions);
+  TranscriptionResult transcribe(
       qint64 startPtsMs,
       const float* samples,
       int sampleCount);
+  TranscriptionResult transcribe(
+      qint64 startPtsMs,
+      const float* samples,
+      int sampleCount,
+      const TranscriptionRuntimeOptions& runtimeOptions);
 
 private:
   struct whisper_context* context_ = nullptr;

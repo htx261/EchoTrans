@@ -95,7 +95,6 @@ MainWindow::MainWindow(QWidget* parent)
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
       pauseButton_(new QPushButton(QStringLiteral("暂停"), this)),
       stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
-      directPlayButton_(new QPushButton(QStringLiteral("直接播放"), this)),
       cancelTaskButton_(new QPushButton(QStringLiteral("取消任务"), this)),
       startTaskButton_(new QPushButton(QStringLiteral("开始任务"), this)),
       importWhisperModelButton_(new QPushButton(QStringLiteral("导入模型"), this)),
@@ -121,6 +120,9 @@ MainWindow::MainWindow(QWidget* parent)
       playbackStatusTimer_(new QTimer(this)) {
   setWindowTitle(QStringLiteral("EchoTrans"));
   resize(1440, 820);
+  QFont windowFont = font();
+  windowFont.setPointSize(std::max(10, windowFont.pointSize() + 1));
+  setFont(windowFont);
 
   auto* central = new QWidget(this);
   auto* layout = new QVBoxLayout(central);
@@ -131,7 +133,7 @@ MainWindow::MainWindow(QWidget* parent)
 
   statusLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
   QFont statusFont = statusLabel_->font();
-  statusFont.setPointSize(10);
+  statusFont.setPointSize(std::max(11, statusFont.pointSize()));
   statusLabel_->setFont(statusFont);
   statusLabel_->setText(report.isReady()
       ? QStringLiteral("依赖正常")
@@ -174,7 +176,6 @@ MainWindow::MainWindow(QWidget* parent)
 
   stopButton_->setEnabled(false);
   pauseButton_->setEnabled(false);
-  directPlayButton_->setObjectName(QStringLiteral("directPlayButton"));
   cancelTaskButton_->setObjectName(QStringLiteral("cancelTaskButton"));
   startTaskButton_->setObjectName(QStringLiteral("startTaskButton"));
   startTaskButton_->setEnabled(false);
@@ -191,8 +192,6 @@ MainWindow::MainWindow(QWidget* parent)
   auto* topToolbarLayout = new QHBoxLayout(topToolbar);
   topToolbarLayout->setContentsMargins(0, 0, 0, 0);
   topToolbarLayout->addWidget(openButton_);
-  topToolbarLayout->addWidget(directPlayButton_);
-  topToolbarLayout->addWidget(cancelTaskButton_);
   topToolbarLayout->addStretch(1);
   topToolbarLayout->addWidget(mediaInfoLabel_, 1);
   topToolbarLayout->addWidget(statusLabel_);
@@ -202,7 +201,6 @@ MainWindow::MainWindow(QWidget* parent)
   seekLayout->addWidget(timeLabel_);
 
   connect(openButton_, &QPushButton::clicked, this, &MainWindow::openMediaFile);
-  connect(directPlayButton_, &QPushButton::clicked, this, &MainWindow::startPendingPlayback);
   connect(startTaskButton_, &QPushButton::clicked, this, &MainWindow::startSelectedTask);
   connect(taskTypeComboBox_, QOverload<int>::of(&QComboBox::currentIndexChanged),
       this, &MainWindow::updateTaskSettingsVisibility);
@@ -315,6 +313,7 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   auto* groupLayout = new QVBoxLayout(group);
 
   taskTypeComboBox_->setObjectName(QStringLiteral("taskTypeComboBox"));
+  taskTypeComboBox_->addItem(QStringLiteral("直接播放"), QStringLiteral("direct_play"));
   taskTypeComboBox_->addItem(QStringLiteral("仅生成字幕"), QStringLiteral("transcribe"));
   taskTypeComboBox_->addItem(QStringLiteral("生成字幕并翻译"), QStringLiteral("translate"));
   taskTypeComboBox_->addItem(QStringLiteral("同声传译（实验）"), QStringLiteral("live_interpretation"));
@@ -326,13 +325,14 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   liveInterpretationDescription_->setObjectName(QStringLiteral("liveInterpretationDescription"));
   liveInterpretationDescription_->setWordWrap(true);
   liveInterpretationDescription_->setText(QStringLiteral(
-      "同声传译会边播放边准备转录和翻译结果，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
+      "同声传译会边播放边进行实时转录，响应更快，但准确度和时间对齐可能不如预处理字幕。"));
   QFont liveDescriptionFont = liveInterpretationDescription_->font();
   liveDescriptionFont.setPointSize(std::max(8, liveDescriptionFont.pointSize() - 1));
   liveInterpretationDescription_->setFont(liveDescriptionFont);
   liveInterpretationDescription_->setStyleSheet(QStringLiteral("color: #8a5a00;"));
   groupLayout->addWidget(liveInterpretationDescription_);
   groupLayout->addWidget(startTaskButton_);
+  groupLayout->addWidget(cancelTaskButton_);
 
   layout->addWidget(group);
 }
@@ -457,8 +457,7 @@ void MainWindow::updateTaskSettingsVisibility() {
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
       : QStringLiteral("transcribe");
-  const bool translateTask = taskType == QStringLiteral("translate")
-      || taskType == QStringLiteral("live_interpretation");
+  const bool translateTask = taskType == QStringLiteral("translate");
   if (translationSettingsPanel_) {
     translationSettingsPanel_->setHidden(!translateTask);
   }
@@ -556,6 +555,7 @@ void MainWindow::openMediaFile() {
   stopPlayback();
   ++subtitlePreparationGeneration_;
   subtitleTrack_.setSegments({});
+  latestLiveSubtitleText_.clear();
   updateSubtitle(0);
   updateTranscriptPanel(0);
   setTaskButtonsEnabled(false);
@@ -766,20 +766,78 @@ void MainWindow::startPendingLiveInterpretation() {
   }
 
   subtitleTrack_.setSegments({});
+  latestLiveSubtitleText_.clear();
   updateSubtitle(0);
   updateTranscriptPanel(0);
-  statusBar()->showMessage(QStringLiteral("同声传译已开始，准确度可能不如预处理字幕"));
+  statusBar()->showMessage(QStringLiteral("实时转录已开始，准确度可能不如预处理字幕"));
   if (!startPlayback(pendingPlaybackInfo_)) {
     return;
   }
 
-  startSubtitlePreparation(pendingPlaybackInfo_, true, true);
+  const int generation = ++subtitlePreparationGeneration_;
+  subtitlePreparationUpdatesPlayback_ = true;
+  setTaskButtonsEnabled(false);
+  cancelTaskButton_->setEnabled(true);
+  subtitlePreparationCancelRequested_ = std::make_shared<std::atomic_bool>(false);
+  const std::shared_ptr<std::atomic_bool> cancelRequested = subtitlePreparationCancelRequested_;
+  const TranscriptionOptions options = transcriptionOptions();
+  const BaiduTranslationSettings translationSettings = baiduTranslationSettings();
+  const QString sourceLanguage = baiduSourceLanguageForWhisperLanguage(options.languageCode);
+
+  subtitlePreparationWatcher_->setFuture(QtConcurrent::run(
+      [this, generation, options, translationSettings, sourceLanguage, cancelRequested]() {
+    LiveSubtitleInterpreter interpreter;
+    LiveSubtitleInterpreterRequest request;
+    request.options = options;
+    request.translationSettings = translationSettings;
+    request.sourceLanguage = sourceLanguage;
+    request.targetLanguage = QStringLiteral("zh");
+    request.streamStepMs = 500;
+    request.streamLengthMs = 4000;
+    request.streamKeepMs = 200;
+    request.translationIntervalMs = 1500;
+    request.translateSegments = false;
+    request.cancelRequested = cancelRequested;
+    request.takeAudioFrame = [this](TranscriptionAudioFrame* frame) {
+      return player_.takeTranscriptionAudioFrame(frame);
+    };
+    request.isPlaybackActive = [this]() {
+      return player_.activeWorkerCount() > 0
+          || player_.state() == PlaybackState::Playing
+          || player_.state() == PlaybackState::Paused;
+    };
+    request.progressCallback = [this, generation](const LiveSubtitleInterpreterProgress& progress) {
+      QMetaObject::invokeMethod(this, [this, generation, progress]() {
+        updateSubtitlePreparationProgress(generation, MediaSubtitlePreparationProgress{
+            MediaSubtitlePreparationStage::Translating,
+            0,
+            progress.message});
+      }, Qt::QueuedConnection);
+    };
+    request.segmentCallback = [this, generation](const SubtitleSegment& segment) {
+      QMetaObject::invokeMethod(this, [this, generation, segment]() {
+        appendLiveSubtitleSegment(generation, segment);
+      }, Qt::QueuedConnection);
+    };
+
+    const LiveSubtitleInterpreterResult liveResult = interpreter.run(request);
+    MediaSubtitlePreparationResult result;
+    result.success = liveResult.success;
+    result.canceled = liveResult.canceled;
+    result.errorMessage = liveResult.errorMessage;
+    result.subtitleTrack = liveResult.subtitleTrack;
+    return result;
+  }));
 }
 
 void MainWindow::startSelectedTask() {
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
-      : QStringLiteral("transcribe");
+      : QStringLiteral("direct_play");
+  if (taskType == QStringLiteral("direct_play")) {
+    startPendingPlayback();
+    return;
+  }
   if (taskType == QStringLiteral("live_interpretation")) {
     startPendingLiveInterpretation();
     return;
@@ -790,6 +848,20 @@ void MainWindow::startSelectedTask() {
   }
 
   startPendingTranscription();
+}
+
+void MainWindow::appendLiveSubtitleSegment(int generation, const SubtitleSegment& segment) {
+  if (generation != subtitlePreparationGeneration_) {
+    return;
+  }
+
+  subtitleTrack_.upsertSegment(segment);
+  latestLiveSubtitleText_ = segment.translatedText.isEmpty()
+      ? segment.sourceText
+      : segment.translatedText;
+  const qint64 positionMs = player_.audioClockMs();
+  updateSubtitle(positionMs);
+  updateTranscriptPanel(positionMs);
 }
 
 void MainWindow::cancelSubtitlePreparation() {
@@ -806,9 +878,6 @@ void MainWindow::cancelSubtitlePreparation() {
 }
 
 void MainWindow::setTaskButtonsEnabled(bool enabled) {
-  if (directPlayButton_) {
-    directPlayButton_->setEnabled(enabled);
-  }
   if (startTaskButton_) {
     startTaskButton_->setEnabled(enabled);
   }
@@ -825,6 +894,9 @@ void MainWindow::updateSubtitlePreparationProgress(
       ? QStringLiteral("%1 %2%").arg(progress.message).arg(progress.percent)
       : progress.message;
   statusBar()->showMessage(message);
+  if (subtitlePreparationUpdatesPlayback_ && !subtitleTrack_.isEmpty()) {
+    return;
+  }
   transcriptListLabel_->setText(message);
 }
 
@@ -878,6 +950,7 @@ void MainWindow::stopPlayback() {
   pendingSeekPositionMs_ = -1;
   currentHasAudio_ = false;
   currentHasVideo_ = false;
+  latestLiveSubtitleText_.clear();
   pauseButton_->setEnabled(false);
   pauseButton_->setText(QStringLiteral("暂停"));
   stopButton_->setEnabled(false);
@@ -904,6 +977,7 @@ bool MainWindow::seekInProgress() const {
 
 void MainWindow::setSubtitleTrack(const SubtitleTrack& track) {
   subtitleTrack_ = track;
+  latestLiveSubtitleText_.clear();
   updateSubtitle(player_.audioClockMs());
   updateTranscriptPanel(player_.audioClockMs());
 }
@@ -940,6 +1014,18 @@ void MainWindow::setPendingPlaybackInfoForTest(const MediaInfo& info) {
 
 bool MainWindow::importWhisperModelForTest(const QString& sourcePath) {
   return importWhisperModelFromPath(sourcePath, false);
+}
+
+void MainWindow::displayLiveSubtitleSegmentForTest(
+    const SubtitleSegment& segment,
+    qint64 playbackPositionMs) {
+  subtitlePreparationUpdatesPlayback_ = true;
+  subtitleTrack_.upsertSegment(segment);
+  latestLiveSubtitleText_ = segment.translatedText.isEmpty()
+      ? segment.sourceText
+      : segment.translatedText;
+  updateSubtitle(playbackPositionMs);
+  updateTranscriptPanel(playbackPositionMs);
 }
 #endif
 
@@ -1084,7 +1170,10 @@ void MainWindow::updateSubtitle(qint64 positionMs) {
     return;
   }
 
-  const QString text = subtitleTrack_.textAt(positionMs);
+  QString text = subtitleTrack_.textAt(positionMs);
+  if (text.isEmpty() && subtitlePreparationUpdatesPlayback_) {
+    text = latestLiveSubtitleText_;
+  }
   subtitleTimeLabel_->setText(formatDuration(positionMs));
   subtitleLabel_->setText(text.isEmpty()
       ? QStringLiteral("暂无当前字幕")

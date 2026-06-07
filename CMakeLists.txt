@@ -53,6 +53,7 @@ set(ECHOTRANS_FFMPEG_LIBRARIES
 
 add_library(EchoTransCore
   src/core/DependencyReport.cpp
+  src/live/LiveSubtitleInterpreter.cpp
   src/subtitle/SubtitleTrack.cpp
   src/transcription/MediaSubtitlePreparer.cpp
   src/transcription/TranscriptionAudioPreprocessor.cpp
@@ -294,6 +295,21 @@ target_link_libraries(BaiduTranslatorTests
     Qt5::Test
 )
 
+add_executable(LiveSubtitleInterpreterTests
+  tests/live/LiveSubtitleInterpreterTests.cpp
+)
+
+target_include_directories(LiveSubtitleInterpreterTests
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(LiveSubtitleInterpreterTests
+  PRIVATE
+    EchoTransCore
+    Qt5::Test
+)
+
 add_executable(VideoFrameSynchronizerTests
   tests/player/VideoFrameSynchronizerTests.cpp
 )
@@ -346,6 +362,7 @@ add_test(NAME WhisperTranscriberTests COMMAND WhisperTranscriberTests)
 add_test(NAME TranscriptionAudioPreprocessorTests COMMAND TranscriptionAudioPreprocessorTests)
 add_test(NAME MediaSubtitlePreparerTests COMMAND MediaSubtitlePreparerTests)
 add_test(NAME BaiduTranslatorTests COMMAND BaiduTranslatorTests)
+add_test(NAME LiveSubtitleInterpreterTests COMMAND LiveSubtitleInterpreterTests)
 add_test(NAME MediaPlayerCoreTests COMMAND MediaPlayerCoreTests)
 add_test(NAME MainWindowTests COMMAND MainWindowTests)
 add_test(NAME VideoFrameSynchronizerTests COMMAND VideoFrameSynchronizerTests)

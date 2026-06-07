@@ -1,5 +1,6 @@
 #pragma once
 
+#include "live/LiveSubtitleInterpreter.h"
 #include "media/MediaInfo.h"
 #include "player/MediaPlayerCore.h"
 #include "subtitle/SubtitleTrack.h"
@@ -40,6 +41,7 @@ public:
 #ifdef ECHOTRANS_TESTING
   void setPendingPlaybackInfoForTest(const MediaInfo& info);
   bool importWhisperModelForTest(const QString& sourcePath);
+  void displayLiveSubtitleSegmentForTest(const SubtitleSegment& segment, qint64 playbackPositionMs);
 #endif
 
 private:
@@ -56,6 +58,7 @@ private:
   void startPendingTranslation();
   void startPendingLiveInterpretation();
   void startSelectedTask();
+  void appendLiveSubtitleSegment(int generation, const SubtitleSegment& segment);
   void cancelSubtitlePreparation();
   void setTaskButtonsEnabled(bool enabled);
   void updateSubtitlePreparationProgress(
@@ -82,7 +85,6 @@ private:
   QPushButton* openButton_ = nullptr;
   QPushButton* pauseButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
-  QPushButton* directPlayButton_ = nullptr;
   QPushButton* cancelTaskButton_ = nullptr;
   QPushButton* startTaskButton_ = nullptr;
   QPushButton* importWhisperModelButton_ = nullptr;
@@ -119,4 +121,5 @@ private:
   int subtitlePreparationGeneration_ = 0;
   std::shared_ptr<std::atomic_bool> subtitlePreparationCancelRequested_;
   SubtitleTrack subtitleTrack_;
+  QString latestLiveSubtitleText_;
 };
