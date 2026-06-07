@@ -77,9 +77,17 @@ private:
   void updateSubtitle(qint64 positionMs);
   void updateTranscriptPanel(qint64 positionMs);
   QLabel* createOptionDescription(const QString& objectName, const QString& text, QWidget* parent);
+  QPushButton* createTaskModeButton(
+      const QString& objectName,
+      const QString& title,
+      const QString& description,
+      QWidget* parent);
   void setupTaskOptions(QVBoxLayout* layout, QWidget* parent);
   void setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent);
   void setupTranslationOptions(QVBoxLayout* layout, QWidget* parent);
+  void applyLightToolbenchStyle();
+  void selectTaskType(const QString& taskType);
+  void updateTaskModeButtons();
   void updateTaskSettingsVisibility();
   void importWhisperModel();
   bool importWhisperModelFromPath(const QString& sourcePath, bool askBeforeOverwrite);
@@ -92,6 +100,9 @@ private:
   QPushButton* cancelTaskButton_ = nullptr;
   QPushButton* startTaskButton_ = nullptr;
   QPushButton* importWhisperModelButton_ = nullptr;
+  QPushButton* directPlayTaskButton_ = nullptr;
+  QPushButton* preprocessSubtitleTaskButton_ = nullptr;
+  QPushButton* liveSubtitleTaskButton_ = nullptr;
   QLabel* statusLabel_ = nullptr;
   QLabel* liveInterpretationDescription_ = nullptr;
   QLabel* videoLabel_ = nullptr;

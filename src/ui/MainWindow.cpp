@@ -128,9 +128,11 @@ MainWindow::MainWindow(QWidget* parent)
   setFont(windowFont);
 
   auto* central = new QWidget(this);
+  central->setObjectName(QStringLiteral("centralWidget"));
   auto* layout = new QVBoxLayout(central);
   layout->setContentsMargins(16, 16, 16, 12);
   layout->setSpacing(12);
+  applyLightToolbenchStyle();
 
   const DependencyReport report = DependencyReport::fromConfiguredPaths();
 
@@ -141,6 +143,9 @@ MainWindow::MainWindow(QWidget* parent)
   statusLabel_->setText(report.isReady()
       ? QStringLiteral("依赖正常")
       : QStringLiteral("依赖异常"));
+  statusLabel_->setObjectName(report.isReady()
+      ? QStringLiteral("statusPillReady")
+      : QStringLiteral("statusPillError"));
 
   QFont statusBarFont = statusBar()->font();
   statusBarFont.setPointSize(std::max(12, statusBarFont.pointSize() + 2));
@@ -185,6 +190,7 @@ MainWindow::MainWindow(QWidget* parent)
   transcriptListLabel_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
   transcriptListLabel_->setWordWrap(true);
   transcriptListLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  transcriptListLabel_->setContentsMargins(10, 10, 10, 10);
   transcriptListLabel_->setText(QStringLiteral("暂无转录字幕"));
   transcriptListLabel_->setStyleSheet(QStringLiteral("color: #475467;"));
 
@@ -200,12 +206,16 @@ MainWindow::MainWindow(QWidget* parent)
   useTranslationCheckBox_->setObjectName(QStringLiteral("useTranslationCheckBox"));
   seekSlider_->setObjectName(QStringLiteral("seekSlider"));
   seekSlider_->setRange(0, 0);
+  timeLabel_->setObjectName(QStringLiteral("timeLabel"));
   timeLabel_->setText(QStringLiteral("00:00:00 / 00:00:00"));
 
   auto* topToolbar = new QWidget(central);
   topToolbar->setObjectName(QStringLiteral("topToolbar"));
   auto* topToolbarLayout = new QHBoxLayout(topToolbar);
-  topToolbarLayout->setContentsMargins(0, 0, 0, 0);
+  topToolbarLayout->setContentsMargins(14, 10, 14, 10);
+  auto* titleLabel = new QLabel(QStringLiteral("EchoTrans"), topToolbar);
+  titleLabel->setObjectName(QStringLiteral("appTitleLabel"));
+  topToolbarLayout->addWidget(titleLabel);
   topToolbarLayout->addStretch(1);
   topToolbarLayout->addWidget(statusLabel_);
 
@@ -245,13 +255,14 @@ MainWindow::MainWindow(QWidget* parent)
   workspaceLayout->setSpacing(12);
 
   auto* leftPane = new QWidget(mainWorkspace);
+  leftPane->setObjectName(QStringLiteral("leftPane"));
   auto* leftLayout = new QVBoxLayout(leftPane);
   leftLayout->setContentsMargins(0, 0, 0, 0);
   leftLayout->setSpacing(10);
   auto* videoContainer = new QWidget(leftPane);
   videoContainer->setObjectName(QStringLiteral("videoContainer"));
   auto* videoLayout = new QGridLayout(videoContainer);
-  videoLayout->setContentsMargins(0, 0, 0, 0);
+  videoLayout->setContentsMargins(12, 12, 12, 12);
   videoLayout->setSpacing(0);
   videoLayout->addWidget(videoLabel_, 0, 0);
   videoLayout->addWidget(subtitleLabel_, 0, 0, Qt::AlignBottom);
@@ -260,12 +271,14 @@ MainWindow::MainWindow(QWidget* parent)
   auto* playbackControls = new QWidget(leftPane);
   playbackControls->setObjectName(QStringLiteral("playbackControls"));
   auto* playbackControlsLayout = new QHBoxLayout(playbackControls);
-  playbackControlsLayout->setContentsMargins(0, 0, 0, 0);
+  playbackControlsLayout->setContentsMargins(12, 8, 12, 8);
+  playbackControlsLayout->setSpacing(12);
   playbackControlsLayout->addWidget(pauseButton_);
   playbackControlsLayout->addLayout(seekLayout, 1);
   leftLayout->addWidget(playbackControls);
 
   auto* rightPane = new QWidget(mainWorkspace);
+  rightPane->setObjectName(QStringLiteral("rightPane"));
   rightPane->setMinimumWidth(420);
   auto* rightLayout = new QVBoxLayout(rightPane);
   rightLayout->setContentsMargins(0, 0, 0, 0);
@@ -277,6 +290,7 @@ MainWindow::MainWindow(QWidget* parent)
   auto* transcriptPanel = new QGroupBox(QStringLiteral("转录字幕"), rightPane);
   transcriptPanel->setObjectName(QStringLiteral("transcriptPanel"));
   auto* transcriptLayout = new QVBoxLayout(transcriptPanel);
+  transcriptLayout->setContentsMargins(12, 14, 12, 12);
   auto* transcriptScrollArea = new QScrollArea(transcriptPanel);
   transcriptScrollArea->setObjectName(QStringLiteral("transcriptScrollArea"));
   transcriptScrollArea->setWidgetResizable(true);
@@ -311,6 +325,182 @@ MainWindow::~MainWindow() {
   player_.stop();
 }
 
+void MainWindow::applyLightToolbenchStyle() {
+  setStyleSheet(QStringLiteral(
+      "QWidget#centralWidget {"
+      "  background-color: #f4f7fb;"
+      "  color: #0f172a;"
+      "}"
+      "QWidget#topToolbar {"
+      "  background-color: #ffffff;"
+      "  border: 1px solid #dce5f2;"
+      "  border-radius: 8px;"
+      "}"
+      "QLabel#appTitleLabel {"
+      "  color: #0f172a;"
+      "  font-size: 20px;"
+      "  font-weight: 700;"
+      "}"
+      "QLabel#statusPillReady {"
+      "  color: #027a48;"
+      "  background-color: #ecfdf3;"
+      "  border: 1px solid #abefc6;"
+      "  border-radius: 7px;"
+      "  padding: 6px 12px;"
+      "  font-weight: 600;"
+      "}"
+      "QLabel#statusPillError {"
+      "  color: #b42318;"
+      "  background-color: #fef3f2;"
+      "  border: 1px solid #fecdca;"
+      "  border-radius: 7px;"
+      "  padding: 6px 12px;"
+      "  font-weight: 600;"
+      "}"
+      "QWidget#videoContainer, QWidget#playbackControls {"
+      "  background-color: #ffffff;"
+      "  border: 1px solid #dce5f2;"
+      "  border-radius: 8px;"
+      "}"
+      "QWidget#videoContainer QLabel {"
+      "  border-radius: 6px;"
+      "}"
+      "QGroupBox {"
+      "  background-color: #ffffff;"
+      "  border: 1px solid #dce5f2;"
+      "  border-radius: 8px;"
+      "  margin-top: 18px;"
+      "  padding-top: 8px;"
+      "  font-weight: 700;"
+      "  color: #0f172a;"
+      "}"
+      "QGroupBox::title {"
+      "  subcontrol-origin: margin;"
+      "  left: 12px;"
+      "  padding: 0 4px;"
+      "}"
+      "QPushButton {"
+      "  min-height: 34px;"
+      "  border-radius: 7px;"
+      "  padding: 6px 12px;"
+      "  border: 1px solid #cbd7e8;"
+      "  background-color: #ffffff;"
+      "  color: #0f172a;"
+      "  font-weight: 600;"
+      "}"
+      "QPushButton:hover {"
+      "  border-color: #2457d6;"
+      "  background-color: #f5f8ff;"
+      "}"
+      "QPushButton:disabled {"
+      "  color: #98a2b3;"
+      "  background-color: #f2f4f7;"
+      "  border-color: #e4e7ec;"
+      "}"
+      "QPushButton#openMediaButton, QPushButton#startTaskButton {"
+      "  color: #ffffff;"
+      "  background-color: #2457d6;"
+      "  border-color: #2457d6;"
+      "}"
+      "QPushButton#openMediaButton:hover, QPushButton#startTaskButton:hover {"
+      "  background-color: #1740a8;"
+      "}"
+      "QPushButton#cancelTaskButton {"
+      "  color: #b42318;"
+      "  background-color: #fff7f6;"
+      "  border-color: #fecdca;"
+      "}"
+      "QPushButton#pauseButton {"
+      "  color: #1740a8;"
+      "  background-color: #eef4ff;"
+      "  border-color: #bfd0ff;"
+      "}"
+      "QPushButton[taskMode=\"true\"] {"
+      "  min-height: 74px;"
+      "  text-align: left;"
+      "  padding: 10px;"
+      "  background-color: #f8fbff;"
+      "  border: 1px solid #ccd8ea;"
+      "  color: #334155;"
+      "}"
+      "QPushButton[taskMode=\"true\"][selected=\"true\"] {"
+      "  color: #1740a8;"
+      "  background-color: #eaf2ff;"
+      "  border: 1px solid #2457d6;"
+      "}"
+      "QComboBox, QLineEdit, QSpinBox {"
+      "  min-height: 34px;"
+      "  border: 1px solid #cbd7e8;"
+      "  border-radius: 7px;"
+      "  padding: 4px 8px;"
+      "  background-color: #ffffff;"
+      "  color: #0f172a;"
+      "}"
+      "QComboBox:focus, QLineEdit:focus, QSpinBox:focus {"
+      "  border-color: #2457d6;"
+      "}"
+      "QCheckBox {"
+      "  color: #0f172a;"
+      "  font-weight: 600;"
+      "  spacing: 8px;"
+      "}"
+      "QScrollArea#transcriptScrollArea {"
+      "  background-color: #fbfdff;"
+      "  border: 1px solid #dde6f3;"
+      "  border-radius: 8px;"
+      "}"
+      "QLabel#transcriptListLabel {"
+      "  background-color: #fbfdff;"
+      "  color: #475467;"
+      "}"
+      "QLabel#mediaInfoLabel {"
+      "  color: #475467;"
+      "  background-color: #f8fbff;"
+      "  border: 1px solid #e3e9f2;"
+      "  border-radius: 7px;"
+      "  padding: 8px;"
+      "}"
+      "QLabel#timeLabel {"
+      "  color: #64748b;"
+      "  font-weight: 600;"
+      "}"
+      "QSlider::groove:horizontal {"
+      "  height: 7px;"
+      "  border-radius: 3px;"
+      "  background-color: #d8e2f0;"
+      "}"
+      "QSlider::sub-page:horizontal {"
+      "  border-radius: 3px;"
+      "  background-color: #2457d6;"
+      "}"
+      "QSlider::handle:horizontal {"
+      "  width: 14px;"
+      "  height: 14px;"
+      "  margin: -5px 0;"
+      "  border-radius: 7px;"
+      "  background-color: #ffffff;"
+      "  border: 2px solid #2457d6;"
+      "}"
+      "QProgressBar#statusProgressBar {"
+      "  height: 8px;"
+      "  border-radius: 4px;"
+      "  border: 1px solid #cbd7e8;"
+      "  background-color: #e7edf6;"
+      "  text-align: center;"
+      "}"
+      "QProgressBar#statusProgressBar::chunk {"
+      "  border-radius: 4px;"
+      "  background-color: #2457d6;"
+      "}"
+      "QStatusBar {"
+      "  color: #334155;"
+      "  background-color: #ffffff;"
+      "  border-top: 1px solid #dce5f2;"
+      "  font-weight: 600;"
+      "}"
+  ));
+}
+
 QLabel* MainWindow::createOptionDescription(const QString& objectName, const QString& text, QWidget* parent) {
   auto* description = new QLabel(text, parent);
   description->setObjectName(objectName);
@@ -318,14 +508,32 @@ QLabel* MainWindow::createOptionDescription(const QString& objectName, const QSt
   QFont descriptionFont = description->font();
   descriptionFont.setPointSize(std::max(8, descriptionFont.pointSize() - 1));
   description->setFont(descriptionFont);
-  description->setStyleSheet(QStringLiteral("color: #666666;"));
+  description->setStyleSheet(QStringLiteral("color: #64748b;"));
   return description;
+}
+
+QPushButton* MainWindow::createTaskModeButton(
+    const QString& objectName,
+    const QString& title,
+    const QString& description,
+    QWidget* parent) {
+  auto* button = new QPushButton(QStringLiteral("%1\n%2").arg(title, description), parent);
+  button->setObjectName(objectName);
+  button->setProperty("taskMode", true);
+  button->setProperty("selected", false);
+  button->setCheckable(true);
+  button->setCursor(Qt::PointingHandCursor);
+  button->setMinimumHeight(78);
+  button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  return button;
 }
 
 void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   auto* group = new QGroupBox(QStringLiteral("任务设置"), parent);
   group->setObjectName(QStringLiteral("taskOptionsPanel"));
   auto* groupLayout = new QVBoxLayout(group);
+  groupLayout->setContentsMargins(12, 14, 12, 12);
+  groupLayout->setSpacing(10);
 
   auto* fileSectionLabel = new QLabel(QStringLiteral("打开文件"), group);
   fileSectionLabel->setObjectName(QStringLiteral("fileSectionLabel"));
@@ -344,7 +552,43 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   taskTypeComboBox_->addItem(QStringLiteral("直接播放"), QStringLiteral("direct_play"));
   taskTypeComboBox_->addItem(QStringLiteral("预处理字幕"), QStringLiteral("preprocess_subtitle"));
   taskTypeComboBox_->addItem(QStringLiteral("实时字幕"), QStringLiteral("live_subtitle"));
+  taskTypeComboBox_->hide();
   groupLayout->addWidget(taskTypeComboBox_);
+
+  directPlayTaskButton_ = createTaskModeButton(
+      QStringLiteral("directPlayTaskButton"),
+      QStringLiteral("直接播放"),
+      QStringLiteral("只播放媒体文件"),
+      group);
+  preprocessSubtitleTaskButton_ = createTaskModeButton(
+      QStringLiteral("preprocessSubtitleTaskButton"),
+      QStringLiteral("预处理字幕"),
+      QStringLiteral("先生成字幕再播放"),
+      group);
+  liveSubtitleTaskButton_ = createTaskModeButton(
+      QStringLiteral("liveSubtitleTaskButton"),
+      QStringLiteral("实时字幕"),
+      QStringLiteral("边播放边生成"),
+      group);
+
+  auto* taskModeLayout = new QHBoxLayout();
+  taskModeLayout->setContentsMargins(0, 0, 0, 0);
+  taskModeLayout->setSpacing(8);
+  taskModeLayout->addWidget(directPlayTaskButton_);
+  taskModeLayout->addWidget(preprocessSubtitleTaskButton_);
+  taskModeLayout->addWidget(liveSubtitleTaskButton_);
+  groupLayout->addLayout(taskModeLayout);
+
+  connect(directPlayTaskButton_, &QPushButton::clicked, this, [this]() {
+    selectTaskType(QStringLiteral("direct_play"));
+  });
+  connect(preprocessSubtitleTaskButton_, &QPushButton::clicked, this, [this]() {
+    selectTaskType(QStringLiteral("preprocess_subtitle"));
+  });
+  connect(liveSubtitleTaskButton_, &QPushButton::clicked, this, [this]() {
+    selectTaskType(QStringLiteral("live_subtitle"));
+  });
+
   groupLayout->addWidget(createOptionDescription(
       QStringLiteral("taskTypeDescription"),
       QStringLiteral("预处理字幕会先生成字幕再播放；实时字幕会边播放边生成字幕。"),
@@ -365,10 +609,46 @@ void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
   layout->addWidget(group);
 }
 
+void MainWindow::selectTaskType(const QString& taskType) {
+  if (!taskTypeComboBox_) {
+    return;
+  }
+
+  const int index = taskTypeComboBox_->findData(taskType);
+  if (index >= 0) {
+    taskTypeComboBox_->setCurrentIndex(index);
+  }
+}
+
+void MainWindow::updateTaskModeButtons() {
+  if (!taskTypeComboBox_) {
+    return;
+  }
+
+  const QString taskType = taskTypeComboBox_->currentData().toString();
+  const auto updateButton = [](QPushButton* button, bool selected) {
+    if (!button) {
+      return;
+    }
+
+    button->setChecked(selected);
+    button->setProperty("selected", selected);
+    button->style()->unpolish(button);
+    button->style()->polish(button);
+    button->update();
+  };
+
+  updateButton(directPlayTaskButton_, taskType == QStringLiteral("direct_play"));
+  updateButton(preprocessSubtitleTaskButton_, taskType == QStringLiteral("preprocess_subtitle"));
+  updateButton(liveSubtitleTaskButton_, taskType == QStringLiteral("live_subtitle"));
+}
+
 void MainWindow::setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent) {
   transcriptionOptionsPanel_ = new QGroupBox(QStringLiteral("源字幕设置"), parent);
   transcriptionOptionsPanel_->setObjectName(QStringLiteral("transcriptionOptionsPanel"));
   auto* groupLayout = new QFormLayout(transcriptionOptionsPanel_);
+  groupLayout->setContentsMargins(12, 14, 12, 12);
+  groupLayout->setSpacing(10);
   groupLayout->setLabelAlignment(Qt::AlignRight);
   groupLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
@@ -440,6 +720,8 @@ void MainWindow::setupTranslationOptions(QVBoxLayout* layout, QWidget* parent) {
   translationSettingsPanel_ = new QGroupBox(QStringLiteral("翻译设置"), parent);
   translationSettingsPanel_->setObjectName(QStringLiteral("translationSettingsPanel"));
   auto* groupLayout = new QFormLayout(translationSettingsPanel_);
+  groupLayout->setContentsMargins(12, 14, 12, 12);
+  groupLayout->setSpacing(10);
   groupLayout->setLabelAlignment(Qt::AlignRight);
   groupLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
@@ -485,6 +767,7 @@ void MainWindow::updateTaskSettingsVisibility() {
   const QString taskType = taskTypeComboBox_
       ? taskTypeComboBox_->currentData().toString()
       : QStringLiteral("direct_play");
+  updateTaskModeButtons();
   const bool subtitleTask = taskType == QStringLiteral("preprocess_subtitle")
       || taskType == QStringLiteral("live_subtitle");
   const bool liveTask = taskType == QStringLiteral("live_subtitle");

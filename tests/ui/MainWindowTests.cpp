@@ -113,6 +113,7 @@ private slots:
   void showsBaiduTranslationSettings();
   void savesBaiduTranslationSettings();
   void switchesTranslationSettingsByTaskType();
+  void taskModeCardsSelectInternalTaskType();
   void translationSwitchControlsSubtitleTaskRequirements();
   void importsWhisperModelAtRuntime();
   void liveInterpretationModeShowsAccuracyWarning();
@@ -416,6 +417,37 @@ void MainWindowTests::switchesTranslationSettingsByTaskType() {
   QVERIFY(translationSettingsPanel->isHidden());
 }
 
+void MainWindowTests::taskModeCardsSelectInternalTaskType() {
+  MainWindow window;
+
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* directPlayButton = window.findChild<QPushButton*>(QStringLiteral("directPlayTaskButton"));
+  auto* preprocessButton = window.findChild<QPushButton*>(QStringLiteral("preprocessSubtitleTaskButton"));
+  auto* liveSubtitleButton = window.findChild<QPushButton*>(QStringLiteral("liveSubtitleTaskButton"));
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(directPlayButton);
+  QVERIFY(preprocessButton);
+  QVERIFY(liveSubtitleButton);
+
+  QVERIFY(taskTypeComboBox->isHidden());
+  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("direct_play"));
+  QCOMPARE(directPlayButton->property("selected").toBool(), true);
+  QCOMPARE(preprocessButton->property("selected").toBool(), false);
+  QCOMPARE(liveSubtitleButton->property("selected").toBool(), false);
+
+  QTest::mouseClick(preprocessButton, Qt::LeftButton);
+  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("preprocess_subtitle"));
+  QCOMPARE(directPlayButton->property("selected").toBool(), false);
+  QCOMPARE(preprocessButton->property("selected").toBool(), true);
+  QCOMPARE(liveSubtitleButton->property("selected").toBool(), false);
+
+  QTest::mouseClick(liveSubtitleButton, Qt::LeftButton);
+  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("live_subtitle"));
+  QCOMPARE(directPlayButton->property("selected").toBool(), false);
+  QCOMPARE(preprocessButton->property("selected").toBool(), false);
+  QCOMPARE(liveSubtitleButton->property("selected").toBool(), true);
+}
+
 void MainWindowTests::translationSwitchControlsSubtitleTaskRequirements() {
   MainWindow window;
 
@@ -581,21 +613,25 @@ void MainWindowTests::placesOpenFileControlAboveTaskMode() {
 
   auto* openButton = window.findChild<QPushButton*>(QStringLiteral("openMediaButton"));
   auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* directPlayButton = window.findChild<QPushButton*>(QStringLiteral("directPlayTaskButton"));
   auto* taskOptionsPanel = window.findChild<QWidget*>(QStringLiteral("taskOptionsPanel"));
   auto* fileSectionLabel = window.findChild<QLabel*>(QStringLiteral("fileSectionLabel"));
   auto* taskSectionLabel = window.findChild<QLabel*>(QStringLiteral("taskSectionLabel"));
   QVERIFY(openButton);
   QVERIFY(taskTypeComboBox);
+  QVERIFY(directPlayButton);
   QVERIFY(taskOptionsPanel);
   QVERIFY(fileSectionLabel);
   QVERIFY(taskSectionLabel);
 
   QCOMPARE(openButton->parentWidget(), taskOptionsPanel);
   QCOMPARE(taskTypeComboBox->parentWidget(), taskOptionsPanel);
+  QCOMPARE(directPlayButton->parentWidget(), taskOptionsPanel);
+  QVERIFY(taskTypeComboBox->isHidden());
   QCOMPARE(fileSectionLabel->text(), QStringLiteral("打开文件"));
   QCOMPARE(taskSectionLabel->text(), QStringLiteral("任务选择"));
   QVERIFY(fileSectionLabel->y() <= openButton->y());
-  QVERIFY(taskSectionLabel->y() <= taskTypeComboBox->y());
+  QVERIFY(taskSectionLabel->y() <= directPlayButton->y());
   QVERIFY(fileSectionLabel->y() < taskSectionLabel->y());
 }
 
