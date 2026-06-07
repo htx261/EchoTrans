@@ -49,7 +49,6 @@ EchoTrans/
 - `third_party/ffmpeg`：FFmpeg 开发包，需包含 `include/`、`lib/`、`bin/`。
 - `third_party/openssl`：OpenSSL 1.1 运行时，需包含 `bin/libssl-1_1-x64.dll` 和 `bin/libcrypto-1_1-x64.dll`。
 - `third_party/whisper.cpp`：whisper.cpp 源码目录。
-- `models/whisper`：whisper.cpp 使用的 `.bin` 模型文件，例如 `ggml-small.bin`。
 
 ## whisper 模型
 
