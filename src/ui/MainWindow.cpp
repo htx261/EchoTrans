@@ -21,6 +21,7 @@
 #include <QMouseEvent>
 #include <QMetaObject>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -94,7 +95,6 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       openButton_(new QPushButton(QStringLiteral("打开媒体文件"), this)),
       pauseButton_(new QPushButton(QStringLiteral("暂停"), this)),
-      stopButton_(new QPushButton(QStringLiteral("停止播放"), this)),
       cancelTaskButton_(new QPushButton(QStringLiteral("取消任务"), this)),
       startTaskButton_(new QPushButton(QStringLiteral("开始任务"), this)),
       importWhisperModelButton_(new QPushButton(QStringLiteral("导入模型"), this)),
@@ -115,6 +115,7 @@ MainWindow::MainWindow(QWidget* parent)
       baiduAppIdEdit_(new QLineEdit(this)),
       baiduSecretKeyEdit_(new QLineEdit(this)),
       saveBaiduSettingsButton_(new QPushButton(QStringLiteral("保存翻译设置"), this)),
+      statusProgressBar_(new QProgressBar(this)),
       mediaProbeWatcher_(new QFutureWatcher<MediaProbeResult>(this)),
       subtitlePreparationWatcher_(new QFutureWatcher<MediaSubtitlePreparationResult>(this)),
       playbackStatusTimer_(new QTimer(this)) {
@@ -133,11 +134,21 @@ MainWindow::MainWindow(QWidget* parent)
 
   statusLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
   QFont statusFont = statusLabel_->font();
-  statusFont.setPointSize(std::max(11, statusFont.pointSize()));
+  statusFont.setPointSize(std::max(13, statusFont.pointSize() + 2));
   statusLabel_->setFont(statusFont);
   statusLabel_->setText(report.isReady()
       ? QStringLiteral("依赖正常")
       : QStringLiteral("依赖异常"));
+
+  QFont statusBarFont = statusBar()->font();
+  statusBarFont.setPointSize(std::max(12, statusBarFont.pointSize() + 2));
+  statusBar()->setFont(statusBarFont);
+  statusProgressBar_->setObjectName(QStringLiteral("statusProgressBar"));
+  statusProgressBar_->setFixedWidth(160);
+  statusProgressBar_->setRange(0, 100);
+  statusProgressBar_->setValue(0);
+  statusProgressBar_->hide();
+  statusBar()->addPermanentWidget(statusProgressBar_);
 
   mediaInfoLabel_->setAlignment(Qt::AlignLeft);
   mediaInfoLabel_->setWordWrap(true);
@@ -166,6 +177,7 @@ MainWindow::MainWindow(QWidget* parent)
   subtitleTimeLabel_->setObjectName(QStringLiteral("subtitleTimeLabel"));
   subtitleTimeLabel_->setText(QStringLiteral("00:00:00"));
   subtitleTimeLabel_->setStyleSheet(QStringLiteral("color: #667085;"));
+  subtitleTimeLabel_->hide();
 
   transcriptListLabel_->setObjectName(QStringLiteral("transcriptListLabel"));
   transcriptListLabel_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
@@ -174,7 +186,6 @@ MainWindow::MainWindow(QWidget* parent)
   transcriptListLabel_->setText(QStringLiteral("暂无转录字幕"));
   transcriptListLabel_->setStyleSheet(QStringLiteral("color: #475467;"));
 
-  stopButton_->setEnabled(false);
   pauseButton_->setEnabled(false);
   cancelTaskButton_->setObjectName(QStringLiteral("cancelTaskButton"));
   startTaskButton_->setObjectName(QStringLiteral("startTaskButton"));
@@ -184,7 +195,6 @@ MainWindow::MainWindow(QWidget* parent)
   openButton_->setObjectName(QStringLiteral("openMediaButton"));
   mediaInfoLabel_->setObjectName(QStringLiteral("mediaInfoLabel"));
   pauseButton_->setObjectName(QStringLiteral("pauseButton"));
-  stopButton_->setObjectName(QStringLiteral("stopButton"));
   seekSlider_->setObjectName(QStringLiteral("seekSlider"));
   seekSlider_->setRange(0, 0);
   timeLabel_->setText(QStringLiteral("00:00:00 / 00:00:00"));
@@ -208,7 +218,6 @@ MainWindow::MainWindow(QWidget* parent)
   connect(cancelTaskButton_, &QPushButton::clicked, this, &MainWindow::cancelSubtitlePreparation);
   connect(saveBaiduSettingsButton_, &QPushButton::clicked, this, &MainWindow::saveBaiduTranslationSettings);
   connect(pauseButton_, &QPushButton::clicked, this, &MainWindow::togglePauseResume);
-  connect(stopButton_, &QPushButton::clicked, this, &MainWindow::stopPlayback);
   connect(seekSlider_, &QSlider::sliderReleased, this, &MainWindow::seekToSliderValue);
   connect(mediaProbeWatcher_, &QFutureWatcher<MediaProbeResult>::finished,
       this, &MainWindow::onMediaProbeFinished);
@@ -246,7 +255,6 @@ MainWindow::MainWindow(QWidget* parent)
   auto* playbackControlsLayout = new QHBoxLayout(playbackControls);
   playbackControlsLayout->setContentsMargins(0, 0, 0, 0);
   playbackControlsLayout->addWidget(pauseButton_);
-  playbackControlsLayout->addWidget(stopButton_);
   playbackControlsLayout->addLayout(seekLayout, 1);
   leftLayout->addWidget(playbackControls);
 
@@ -308,12 +316,23 @@ QLabel* MainWindow::createOptionDescription(const QString& objectName, const QSt
 }
 
 void MainWindow::setupTaskOptions(QVBoxLayout* layout, QWidget* parent) {
-  auto* group = new QGroupBox(QStringLiteral("任务类型选择"), parent);
+  auto* group = new QGroupBox(QStringLiteral("任务设置"), parent);
   group->setObjectName(QStringLiteral("taskOptionsPanel"));
   auto* groupLayout = new QVBoxLayout(group);
 
+  auto* fileSectionLabel = new QLabel(QStringLiteral("打开文件"), group);
+  fileSectionLabel->setObjectName(QStringLiteral("fileSectionLabel"));
+  QFont sectionFont = fileSectionLabel->font();
+  sectionFont.setBold(true);
+  fileSectionLabel->setFont(sectionFont);
+  groupLayout->addWidget(fileSectionLabel);
   groupLayout->addWidget(openButton_);
   groupLayout->addWidget(mediaInfoLabel_);
+
+  auto* taskSectionLabel = new QLabel(QStringLiteral("任务选择"), group);
+  taskSectionLabel->setObjectName(QStringLiteral("taskSectionLabel"));
+  taskSectionLabel->setFont(sectionFont);
+  groupLayout->addWidget(taskSectionLabel);
   taskTypeComboBox_->setObjectName(QStringLiteral("taskTypeComboBox"));
   taskTypeComboBox_->addItem(QStringLiteral("直接播放"), QStringLiteral("direct_play"));
   taskTypeComboBox_->addItem(QStringLiteral("仅生成字幕"), QStringLiteral("transcribe"));
@@ -565,6 +584,7 @@ void MainWindow::openMediaFile() {
   cancelTaskButton_->setEnabled(false);
   openButton_->setEnabled(false);
   mediaInfoLabel_->setText(QStringLiteral("读取中..."));
+  showStatusProgress(-1);
   statusBar()->showMessage(QStringLiteral("正在打开媒体文件"));
 
   mediaProbeWatcher_->setFuture(QtConcurrent::run([filePath]() {
@@ -573,6 +593,7 @@ void MainWindow::openMediaFile() {
 }
 
 void MainWindow::onMediaProbeFinished() {
+  hideStatusProgress();
   showMediaInfo(mediaProbeWatcher_->result());
 }
 
@@ -593,19 +614,20 @@ void MainWindow::saveBaiduTranslationSettings() {
 void MainWindow::onSubtitlePreparationFinished() {
   openButton_->setEnabled(true);
   cancelTaskButton_->setEnabled(false);
+  hideStatusProgress();
   const bool updateDuringPlayback = subtitlePreparationUpdatesPlayback_;
   subtitlePreparationUpdatesPlayback_ = false;
 
   const MediaSubtitlePreparationResult result = subtitlePreparationWatcher_->result();
   if (result.canceled) {
-    setTaskButtonsEnabled(!updateDuringPlayback);
+    setTaskButtonsEnabled(!pendingPlaybackInfo_.filePath.trimmed().isEmpty());
     statusBar()->showMessage(QStringLiteral("任务已取消"));
     transcriptListLabel_->setText(QStringLiteral("任务已取消"));
     return;
   }
 
   if (!result.success) {
-    setTaskButtonsEnabled(!updateDuringPlayback);
+    setTaskButtonsEnabled(!pendingPlaybackInfo_.filePath.trimmed().isEmpty());
     statusBar()->showMessage(QStringLiteral("字幕准备失败：%1").arg(result.errorMessage));
     transcriptListLabel_->setText(QStringLiteral("字幕准备失败"));
     return;
@@ -670,6 +692,7 @@ void MainWindow::startSubtitlePreparation(
       : QStringLiteral("正在准备转录字幕"));
   transcriptListLabel_->setText(taskMessage);
   statusBar()->showMessage(taskMessage);
+  showStatusProgress(-1);
   setTaskButtonsEnabled(false);
   cancelTaskButton_->setEnabled(true);
   subtitlePreparationCancelRequested_ = std::make_shared<std::atomic_bool>(false);
@@ -734,7 +757,9 @@ void MainWindow::startSubtitlePreparation(
 
 void MainWindow::startPendingPlayback() {
   setTaskButtonsEnabled(false);
-  startPlayback(pendingPlaybackInfo_);
+  if (startPlayback(pendingPlaybackInfo_)) {
+    cancelTaskButton_->setEnabled(true);
+  }
 }
 
 void MainWindow::startPendingTranscription() {
@@ -781,6 +806,7 @@ void MainWindow::startPendingLiveInterpretation() {
   subtitlePreparationUpdatesPlayback_ = true;
   setTaskButtonsEnabled(false);
   cancelTaskButton_->setEnabled(true);
+  showStatusProgress(-1);
   subtitlePreparationCancelRequested_ = std::make_shared<std::atomic_bool>(false);
   const std::shared_ptr<std::atomic_bool> cancelRequested = subtitlePreparationCancelRequested_;
   const TranscriptionOptions options = transcriptionOptions();
@@ -868,14 +894,21 @@ void MainWindow::appendLiveSubtitleSegment(int generation, const SubtitleSegment
 }
 
 void MainWindow::cancelSubtitlePreparation() {
-  if (!subtitlePreparationWatcher_->isRunning()) {
+  const bool hasSubtitleTask = subtitlePreparationWatcher_->isRunning();
+
+  if (hasSubtitleTask && subtitlePreparationCancelRequested_) {
+    subtitlePreparationCancelRequested_->store(true);
+  }
+
+  stopPlayback();
+  cancelTaskButton_->setEnabled(false);
+  hideStatusProgress();
+  if (!hasSubtitleTask) {
+    statusBar()->showMessage(QStringLiteral("播放已取消"));
+    transcriptListLabel_->setText(QStringLiteral("播放已取消"));
     return;
   }
 
-  if (subtitlePreparationCancelRequested_) {
-    subtitlePreparationCancelRequested_->store(true);
-  }
-  cancelTaskButton_->setEnabled(false);
   statusBar()->showMessage(QStringLiteral("正在取消任务..."));
   transcriptListLabel_->setText(QStringLiteral("正在取消任务..."));
 }
@@ -884,6 +917,30 @@ void MainWindow::setTaskButtonsEnabled(bool enabled) {
   if (startTaskButton_) {
     startTaskButton_->setEnabled(enabled);
   }
+}
+
+void MainWindow::showStatusProgress(int percent) {
+  if (!statusProgressBar_) {
+    return;
+  }
+
+  if (percent < 0) {
+    statusProgressBar_->setRange(0, 0);
+  } else {
+    statusProgressBar_->setRange(0, 100);
+    statusProgressBar_->setValue(std::max(0, std::min(100, percent)));
+  }
+  statusProgressBar_->show();
+}
+
+void MainWindow::hideStatusProgress() {
+  if (!statusProgressBar_) {
+    return;
+  }
+
+  statusProgressBar_->setRange(0, 100);
+  statusProgressBar_->setValue(0);
+  statusProgressBar_->hide();
 }
 
 void MainWindow::updateSubtitlePreparationProgress(
@@ -896,6 +953,7 @@ void MainWindow::updateSubtitlePreparationProgress(
   const QString message = progress.percent > 0
       ? QStringLiteral("%1 %2%").arg(progress.message).arg(progress.percent)
       : progress.message;
+  showStatusProgress(progress.percent > 0 ? progress.percent : -1);
   statusBar()->showMessage(message);
   if (subtitlePreparationUpdatesPlayback_ && !subtitleTrack_.isEmpty()) {
     return;
@@ -910,7 +968,6 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
   player_.stop();
   playbackStatusTimer_->stop();
   pauseButton_->setEnabled(false);
-  stopButton_->setEnabled(false);
   displayedVideoFrameCount_ = 0;
   durationMs_ = info.durationMs;
   currentHasAudio_ = info.hasAudio;
@@ -937,7 +994,7 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
     return false;
   }
 
-  stopButton_->setEnabled(true);
+  cancelTaskButton_->setEnabled(true);
   pauseButton_->setEnabled(true);
   pauseButton_->setText(QStringLiteral("暂停"));
   playbackStatusTimer_->start(300);
@@ -953,13 +1010,14 @@ bool MainWindow::startPlayback(const MediaInfo& info) {
 void MainWindow::stopPlayback() {
   playbackStatusTimer_->stop();
   player_.stop();
+  hideStatusProgress();
   pendingSeekPositionMs_ = -1;
   currentHasAudio_ = false;
   currentHasVideo_ = false;
   latestLiveSubtitleText_.clear();
   pauseButton_->setEnabled(false);
   pauseButton_->setText(QStringLiteral("暂停"));
-  stopButton_->setEnabled(false);
+  cancelTaskButton_->setEnabled(false);
   seekSlider_->setValue(0);
   updateTimeLabel(0);
   updateSubtitle(0);
@@ -1062,7 +1120,7 @@ void MainWindow::updatePlaybackStatus() {
       player_.stop();
       pauseButton_->setEnabled(false);
       pauseButton_->setText(QStringLiteral("暂停"));
-      stopButton_->setEnabled(false);
+      cancelTaskButton_->setEnabled(false);
       videoLabel_->setText(QStringLiteral("播放异常"));
       statusBar()->showMessage(fatalError);
     }
@@ -1072,7 +1130,7 @@ void MainWindow::updatePlaybackStatus() {
   if (player_.state() == PlaybackState::Stopped) {
     playbackStatusTimer_->stop();
     pauseButton_->setEnabled(false);
-    stopButton_->setEnabled(false);
+    cancelTaskButton_->setEnabled(false);
     return;
   }
 

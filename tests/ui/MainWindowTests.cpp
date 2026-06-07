@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QProcess>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -119,6 +120,9 @@ private slots:
   void placesOpenFileControlAboveTaskMode();
   void keepsLastMediaAfterStoppingPlayback();
   void placesPlaybackControlsBelowVideo();
+  void hidesDetachedSubtitleTimeLabel();
+  void cancelTaskStopsDirectPlayback();
+  void showsLargeStatusBarWithProgressIndicator();
   void overlaysSubtitleOnVideo();
   void constrainsGrowingSubtitleText();
   void translateButtonStartsTranslationTaskFlow();
@@ -503,16 +507,27 @@ void MainWindowTests::showsTaskModeAndCancelControls() {
 
 void MainWindowTests::placesOpenFileControlAboveTaskMode() {
   MainWindow window;
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
 
   auto* openButton = window.findChild<QPushButton*>(QStringLiteral("openMediaButton"));
   auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
   auto* taskOptionsPanel = window.findChild<QWidget*>(QStringLiteral("taskOptionsPanel"));
+  auto* fileSectionLabel = window.findChild<QLabel*>(QStringLiteral("fileSectionLabel"));
+  auto* taskSectionLabel = window.findChild<QLabel*>(QStringLiteral("taskSectionLabel"));
   QVERIFY(openButton);
   QVERIFY(taskTypeComboBox);
   QVERIFY(taskOptionsPanel);
+  QVERIFY(fileSectionLabel);
+  QVERIFY(taskSectionLabel);
 
   QCOMPARE(openButton->parentWidget(), taskOptionsPanel);
   QCOMPARE(taskTypeComboBox->parentWidget(), taskOptionsPanel);
+  QCOMPARE(fileSectionLabel->text(), QStringLiteral("打开文件"));
+  QCOMPARE(taskSectionLabel->text(), QStringLiteral("任务选择"));
+  QVERIFY(fileSectionLabel->y() <= openButton->y());
+  QVERIFY(taskSectionLabel->y() <= taskTypeComboBox->y());
+  QVERIFY(fileSectionLabel->y() < taskSectionLabel->y());
 }
 
 void MainWindowTests::keepsLastMediaAfterStoppingPlayback() {
@@ -547,13 +562,58 @@ void MainWindowTests::placesPlaybackControlsBelowVideo() {
   auto* playbackControls = window.findChild<QWidget*>(QStringLiteral("playbackControls"));
   auto* pauseButton = window.findChild<QPushButton*>(QStringLiteral("pauseButton"));
   auto* stopButton = window.findChild<QPushButton*>(QStringLiteral("stopButton"));
+  auto* seekSlider = window.findChild<QSlider*>(QStringLiteral("seekSlider"));
   auto* videoContainer = window.findChild<QWidget*>(QStringLiteral("videoContainer"));
   QVERIFY(playbackControls);
   QVERIFY(pauseButton);
-  QVERIFY(stopButton);
+  QVERIFY(!stopButton);
+  QVERIFY(seekSlider);
   QVERIFY(videoContainer);
   QCOMPARE(pauseButton->parentWidget(), playbackControls);
-  QCOMPARE(stopButton->parentWidget(), playbackControls);
+  QCOMPARE(seekSlider->parentWidget(), playbackControls);
+}
+
+void MainWindowTests::hidesDetachedSubtitleTimeLabel() {
+  MainWindow window;
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto* subtitleTimeLabel = window.findChild<QLabel*>(QStringLiteral("subtitleTimeLabel"));
+  QVERIFY(subtitleTimeLabel);
+  QVERIFY(!subtitleTimeLabel->isVisible());
+}
+
+void MainWindowTests::cancelTaskStopsDirectPlayback() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+
+  const QString path = writeSilentWavFile(dir.filePath(QStringLiteral("cancel-playback.wav")));
+  QVERIFY(!path.isEmpty());
+
+  MediaInfo info;
+  info.filePath = path;
+  info.hasAudio = true;
+
+  MainWindow window;
+  QVERIFY(window.startPlayback(info));
+
+  auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelTaskButton"));
+  QVERIFY(cancelButton);
+  cancelButton->setEnabled(true);
+  QTest::mouseClick(cancelButton, Qt::LeftButton);
+
+  QCOMPARE(window.playbackState(), PlaybackState::Stopped);
+}
+
+void MainWindowTests::showsLargeStatusBarWithProgressIndicator() {
+  MainWindow window;
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto* progressBar = window.findChild<QProgressBar*>(QStringLiteral("statusProgressBar"));
+  QVERIFY(progressBar);
+  QVERIFY(!progressBar->isVisible());
+  QVERIFY(window.statusBar()->font().pointSize() >= 12);
 }
 
 void MainWindowTests::overlaysSubtitleOnVideo() {
