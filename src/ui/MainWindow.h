@@ -14,6 +14,7 @@
 
 class QLabel;
 class QComboBox;
+class QGroupBox;
 class QLineEdit;
 class QPushButton;
 class QSlider;
@@ -38,6 +39,7 @@ public:
   BaiduTranslationSettings baiduTranslationSettings() const;
 #ifdef ECHOTRANS_TESTING
   void setPendingPlaybackInfoForTest(const MediaInfo& info);
+  bool importWhisperModelForTest(const QString& sourcePath);
 #endif
 
 private:
@@ -45,10 +47,15 @@ private:
   void onMediaProbeFinished();
   void onSubtitlePreparationFinished();
   void showMediaInfo(const MediaProbeResult& result);
-  void startSubtitlePreparation(const MediaInfo& info, bool translateAfterTranscription);
+  void startSubtitlePreparation(
+      const MediaInfo& info,
+      bool translateAfterTranscription,
+      bool updateDuringPlayback = false);
   void startPendingPlayback();
   void startPendingTranscription();
   void startPendingTranslation();
+  void startPendingLiveInterpretation();
+  void startSelectedTask();
   void cancelSubtitlePreparation();
   void setTaskButtonsEnabled(bool enabled);
   void updateSubtitlePreparationProgress(
@@ -62,8 +69,12 @@ private:
   void updateSubtitle(qint64 positionMs);
   void updateTranscriptPanel(qint64 positionMs);
   QLabel* createOptionDescription(const QString& objectName, const QString& text, QWidget* parent);
+  void setupTaskOptions(QVBoxLayout* layout, QWidget* parent);
   void setupTranscriptionOptions(QVBoxLayout* layout, QWidget* parent);
   void setupTranslationOptions(QVBoxLayout* layout, QWidget* parent);
+  void updateTaskSettingsVisibility();
+  void importWhisperModel();
+  bool importWhisperModelFromPath(const QString& sourcePath, bool askBeforeOverwrite);
   void populateTranscriptionModels();
   void loadBaiduTranslationSettings();
   void saveBaiduTranslationSettings();
@@ -72,10 +83,11 @@ private:
   QPushButton* pauseButton_ = nullptr;
   QPushButton* stopButton_ = nullptr;
   QPushButton* directPlayButton_ = nullptr;
-  QPushButton* transcribeButton_ = nullptr;
-  QPushButton* translateSubtitleButton_ = nullptr;
-  QPushButton* cancelSubtitlePreparationButton_ = nullptr;
+  QPushButton* cancelTaskButton_ = nullptr;
+  QPushButton* startTaskButton_ = nullptr;
+  QPushButton* importWhisperModelButton_ = nullptr;
   QLabel* statusLabel_ = nullptr;
+  QLabel* liveInterpretationDescription_ = nullptr;
   QLabel* videoLabel_ = nullptr;
   QLabel* subtitleLabel_ = nullptr;
   QLabel* subtitleTimeLabel_ = nullptr;
@@ -83,10 +95,13 @@ private:
   QLabel* mediaInfoLabel_ = nullptr;
   QLabel* timeLabel_ = nullptr;
   QSlider* seekSlider_ = nullptr;
+  QComboBox* taskTypeComboBox_ = nullptr;
   QComboBox* transcriptionModelComboBox_ = nullptr;
   QComboBox* transcriptionLanguageComboBox_ = nullptr;
   QSpinBox* transcriptionThreadSpinBox_ = nullptr;
   QLineEdit* transcriptionPromptEdit_ = nullptr;
+  QGroupBox* transcriptionOptionsPanel_ = nullptr;
+  QGroupBox* translationSettingsPanel_ = nullptr;
   QLineEdit* baiduAppIdEdit_ = nullptr;
   QLineEdit* baiduSecretKeyEdit_ = nullptr;
   QPushButton* saveBaiduSettingsButton_ = nullptr;
@@ -100,6 +115,7 @@ private:
   qint64 pendingSeekPositionMs_ = -1;
   bool currentHasAudio_ = false;
   bool currentHasVideo_ = false;
+  bool subtitlePreparationUpdatesPlayback_ = false;
   int subtitlePreparationGeneration_ = 0;
   std::shared_ptr<std::atomic_bool> subtitlePreparationCancelRequested_;
   SubtitleTrack subtitleTrack_;
