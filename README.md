@@ -4,6 +4,8 @@ EchoTrans 是一款基于 C++ 和 Qt 的 AI 同声传译助手，面向外语演
 
 当前版本以字幕呈现为主，不包含中文语音播报。
 
+视频demo地址：https://www.bilibili.com/video/BV1BJEh6vEDr/?vd_source=00028718da1d817f1c957b12e3d3d0ab
+
 ## 功能目标
 
 - 打开并播放本地音视频文件。
@@ -40,9 +42,6 @@ EchoTrans/
     ffmpeg/
     openssl/
     whisper.cpp/
-
-  models/
-    whisper/
 ```
 
 其中：
@@ -79,9 +78,6 @@ ggml-medium.bin
 模型越大，通常识别效果越好，但转录速度和内存占用也会更高。资源包提供几个比较轻量的模型：
 
 ```text
-ggml-base.bin
-ggml-base.en.bin 
-ggml-small.bin
 ggml-tiny.bin
 ggml-tiny.en.bin
 
@@ -166,9 +162,6 @@ third_party/
   ffmpeg/
   openssl/
   whisper.cpp/
-
-models/
-  whisper/
 ```
 
 ### 3. 配置 CMake
