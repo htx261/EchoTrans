@@ -17,6 +17,7 @@ class QLabel;
 class QComboBox;
 class QGroupBox;
 class QLineEdit;
+class QProgressBar;
 class QPushButton;
 class QSlider;
 class QSpinBox;
@@ -61,6 +62,8 @@ private:
   void appendLiveSubtitleSegment(int generation, const SubtitleSegment& segment);
   void cancelSubtitlePreparation();
   void setTaskButtonsEnabled(bool enabled);
+  void showStatusProgress(int percent);
+  void hideStatusProgress();
   void updateSubtitlePreparationProgress(
       int generation,
       const MediaSubtitlePreparationProgress& progress);
@@ -84,7 +87,6 @@ private:
 
   QPushButton* openButton_ = nullptr;
   QPushButton* pauseButton_ = nullptr;
-  QPushButton* stopButton_ = nullptr;
   QPushButton* cancelTaskButton_ = nullptr;
   QPushButton* startTaskButton_ = nullptr;
   QPushButton* importWhisperModelButton_ = nullptr;
@@ -107,6 +109,7 @@ private:
   QLineEdit* baiduAppIdEdit_ = nullptr;
   QLineEdit* baiduSecretKeyEdit_ = nullptr;
   QPushButton* saveBaiduSettingsButton_ = nullptr;
+  QProgressBar* statusProgressBar_ = nullptr;
   QFutureWatcher<MediaProbeResult>* mediaProbeWatcher_ = nullptr;
   QFutureWatcher<MediaSubtitlePreparationResult>* subtitlePreparationWatcher_ = nullptr;
   QTimer* playbackStatusTimer_ = nullptr;
