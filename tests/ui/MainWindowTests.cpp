@@ -5,6 +5,7 @@
 
 #include <QFile>
 #include <QCoreApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -112,6 +113,7 @@ private slots:
   void showsBaiduTranslationSettings();
   void savesBaiduTranslationSettings();
   void switchesTranslationSettingsByTaskType();
+  void translationSwitchControlsSubtitleTaskRequirements();
   void importsWhisperModelAtRuntime();
   void liveInterpretationModeShowsAccuracyWarning();
   void liveInterpretationStartsPlaybackBeforeSubtitlesFinish();
@@ -125,7 +127,7 @@ private slots:
   void showsLargeStatusBarWithProgressIndicator();
   void overlaysSubtitleOnVideo();
   void constrainsGrowingSubtitleText();
-  void translateButtonStartsTranslationTaskFlow();
+  void subtitleTranslationSwitchStartsTranslationTaskFlow();
   void usesCompactWorkspaceLayout();
 };
 
@@ -353,16 +355,22 @@ void MainWindowTests::savesBaiduTranslationSettings() {
   QSettings().clear();
 
   MainWindow window;
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* useTranslationCheckBox = window.findChild<QCheckBox*>(QStringLiteral("useTranslationCheckBox"));
   auto* appIdEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduAppIdEdit"));
   auto* secretKeyEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduSecretKeyEdit"));
   auto* saveButton = window.findChild<QPushButton*>(QStringLiteral("saveBaiduSettingsButton"));
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(useTranslationCheckBox);
   QVERIFY(appIdEdit);
   QVERIFY(secretKeyEdit);
   QVERIFY(saveButton);
 
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("preprocess_subtitle")));
+  useTranslationCheckBox->setChecked(true);
   appIdEdit->setText(QStringLiteral("test-app-id"));
   secretKeyEdit->setText(QStringLiteral("test-secret-key"));
-  QTest::mouseClick(saveButton, Qt::LeftButton);
+  saveButton->click();
 
   QSettings settings;
   QCOMPARE(settings.value(QStringLiteral("baiduTranslator/appId")).toString(), QStringLiteral("test-app-id"));
@@ -375,17 +383,75 @@ void MainWindowTests::switchesTranslationSettingsByTaskType() {
 
   auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
   auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* transcriptionOptionsPanel = window.findChild<QWidget*>(QStringLiteral("transcriptionOptionsPanel"));
   auto* translationSettingsPanel = window.findChild<QWidget*>(QStringLiteral("translationSettingsPanel"));
+  auto* useTranslationCheckBox = window.findChild<QCheckBox*>(QStringLiteral("useTranslationCheckBox"));
   QVERIFY(taskTypeComboBox);
   QVERIFY(startTaskButton);
+  QVERIFY(transcriptionOptionsPanel);
   QVERIFY(translationSettingsPanel);
+  QVERIFY(useTranslationCheckBox);
 
+  QCOMPARE(taskTypeComboBox->count(), 3);
   QVERIFY(taskTypeComboBox->findData(QStringLiteral("direct_play")) >= 0);
+  QVERIFY(taskTypeComboBox->findData(QStringLiteral("preprocess_subtitle")) >= 0);
+  QVERIFY(taskTypeComboBox->findData(QStringLiteral("live_subtitle")) >= 0);
+  QCOMPARE(taskTypeComboBox->findData(QStringLiteral("transcribe")), -1);
+  QCOMPARE(taskTypeComboBox->findData(QStringLiteral("translate")), -1);
+  QCOMPARE(taskTypeComboBox->findData(QStringLiteral("live_interpretation")), -1);
   QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("direct_play"));
+  QVERIFY(transcriptionOptionsPanel->isHidden());
+  QVERIFY(translationSettingsPanel->isHidden());
+  QVERIFY(useTranslationCheckBox->isHidden());
+
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("preprocess_subtitle")));
+  QVERIFY(!transcriptionOptionsPanel->isHidden());
+  QVERIFY(!useTranslationCheckBox->isHidden());
+  QVERIFY(!useTranslationCheckBox->isChecked());
   QVERIFY(translationSettingsPanel->isHidden());
 
-  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("translate")));
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_subtitle")));
+  QVERIFY(!transcriptionOptionsPanel->isHidden());
+  QVERIFY(!useTranslationCheckBox->isHidden());
+  QVERIFY(translationSettingsPanel->isHidden());
+}
+
+void MainWindowTests::translationSwitchControlsSubtitleTaskRequirements() {
+  MainWindow window;
+
+  MediaInfo info;
+  info.filePath = QStringLiteral("Z:/missing/media.mp4");
+  info.hasAudio = true;
+  window.setPendingPlaybackInfoForTest(info);
+
+  auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
+  auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
+  auto* useTranslationCheckBox = window.findChild<QCheckBox*>(QStringLiteral("useTranslationCheckBox"));
+  auto* translationSettingsPanel = window.findChild<QWidget*>(QStringLiteral("translationSettingsPanel"));
+  auto* appIdEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduAppIdEdit"));
+  auto* secretKeyEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduSecretKeyEdit"));
+  QVERIFY(taskTypeComboBox);
+  QVERIFY(startTaskButton);
+  QVERIFY(useTranslationCheckBox);
+  QVERIFY(translationSettingsPanel);
+  QVERIFY(appIdEdit);
+  QVERIFY(secretKeyEdit);
+
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("preprocess_subtitle")));
+  startTaskButton->setEnabled(true);
+  QVERIFY(startTaskButton->isEnabled());
+
+  useTranslationCheckBox->setChecked(true);
   QVERIFY(!translationSettingsPanel->isHidden());
+  QVERIFY(!startTaskButton->isEnabled());
+
+  appIdEdit->setText(QStringLiteral("test-app-id"));
+  secretKeyEdit->setText(QStringLiteral("test-secret-key"));
+  QVERIFY(startTaskButton->isEnabled());
+
+  useTranslationCheckBox->setChecked(false);
+  QVERIFY(translationSettingsPanel->isHidden());
+  QVERIFY(startTaskButton->isEnabled());
 }
 
 void MainWindowTests::liveInterpretationModeShowsAccuracyWarning() {
@@ -393,16 +459,19 @@ void MainWindowTests::liveInterpretationModeShowsAccuracyWarning() {
 
   auto* taskTypeComboBox = window.findChild<QComboBox*>(QStringLiteral("taskTypeComboBox"));
   auto* translationSettingsPanel = window.findChild<QWidget*>(QStringLiteral("translationSettingsPanel"));
+  auto* useTranslationCheckBox = window.findChild<QCheckBox*>(QStringLiteral("useTranslationCheckBox"));
   auto* liveDescription = window.findChild<QLabel*>(QStringLiteral("liveInterpretationDescription"));
   QVERIFY(taskTypeComboBox);
   QVERIFY(translationSettingsPanel);
+  QVERIFY(useTranslationCheckBox);
   QVERIFY(liveDescription);
 
-  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_subtitle")));
 
-  QVERIFY(!translationSettingsPanel->isHidden());
+  QVERIFY(translationSettingsPanel->isHidden());
+  QVERIFY(!useTranslationCheckBox->isHidden());
   QVERIFY(!liveDescription->isHidden());
-  QVERIFY(liveDescription->text().contains(QStringLiteral("实时转录和翻译")));
+  QVERIFY(liveDescription->text().contains(QStringLiteral("实时字幕")));
   QVERIFY(liveDescription->text().contains(QStringLiteral("不如预处理字幕")));
 }
 
@@ -438,7 +507,7 @@ void MainWindowTests::liveInterpretationStartsPlaybackBeforeSubtitlesFinish() {
 
   modelComboBox->clear();
   modelComboBox->addItem(QStringLiteral("fake-model.bin"), modelPath);
-  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_subtitle")));
   startTaskButton->setEnabled(true);
 
   QTest::mouseClick(startTaskButton, Qt::LeftButton);
@@ -644,7 +713,7 @@ void MainWindowTests::constrainsGrowingSubtitleText() {
   QCOMPARE(transcriptScrollArea->widgetResizable(), true);
 }
 
-void MainWindowTests::translateButtonStartsTranslationTaskFlow() {
+void MainWindowTests::subtitleTranslationSwitchStartsTranslationTaskFlow() {
   MainWindow window;
 
   MediaInfo info;
@@ -663,7 +732,17 @@ void MainWindowTests::translateButtonStartsTranslationTaskFlow() {
 
   modelComboBox->clear();
   modelComboBox->addItem(QStringLiteral("missing.bin"), QStringLiteral("Z:/missing/ggml-base.bin"));
-  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("translate")));
+  auto* useTranslationCheckBox = window.findChild<QCheckBox*>(QStringLiteral("useTranslationCheckBox"));
+  auto* appIdEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduAppIdEdit"));
+  auto* secretKeyEdit = window.findChild<QLineEdit*>(QStringLiteral("baiduSecretKeyEdit"));
+  QVERIFY(useTranslationCheckBox);
+  QVERIFY(appIdEdit);
+  QVERIFY(secretKeyEdit);
+
+  taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("preprocess_subtitle")));
+  useTranslationCheckBox->setChecked(true);
+  appIdEdit->setText(QStringLiteral("test-app-id"));
+  secretKeyEdit->setText(QStringLiteral("test-secret-key"));
   startTaskButton->setEnabled(true);
 
   QTest::mouseClick(startTaskButton, Qt::LeftButton);
