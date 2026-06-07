@@ -21,6 +21,19 @@ TranscriptionOptions TranscriptionOptions::defaults() {
   return options;
 }
 
+TranscriptionRuntimeOptions TranscriptionRuntimeOptions::defaults() {
+  return TranscriptionRuntimeOptions{};
+}
+
+TranscriptionRuntimeOptions TranscriptionRuntimeOptions::streaming() {
+  TranscriptionRuntimeOptions options;
+  options.noContext = true;
+  options.noTimestamps = true;
+  options.singleSegment = true;
+  options.maxTokens = 0;
+  return options;
+}
+
 WhisperTranscriber::~WhisperTranscriber() {
   unloadModel();
 }
@@ -68,13 +81,35 @@ TranscriptionOptions WhisperTranscriber::options() const {
 }
 
 TranscriptionResult WhisperTranscriber::transcribe(const TranscriptionAudioInput& audio) {
-  return transcribe(audio.startPtsMs, audio.samples.constData(), audio.samples.size());
+  return transcribe(audio, TranscriptionRuntimeOptions::defaults());
+}
+
+TranscriptionResult WhisperTranscriber::transcribe(
+    const TranscriptionAudioInput& audio,
+    const TranscriptionRuntimeOptions& runtimeOptions) {
+  return transcribe(
+      audio.startPtsMs,
+      audio.samples.constData(),
+      audio.samples.size(),
+      runtimeOptions);
 }
 
 TranscriptionResult WhisperTranscriber::transcribe(
     qint64 startPtsMs,
     const float* samples,
     int sampleCount) {
+  return transcribe(
+      startPtsMs,
+      samples,
+      sampleCount,
+      TranscriptionRuntimeOptions::defaults());
+}
+
+TranscriptionResult WhisperTranscriber::transcribe(
+    qint64 startPtsMs,
+    const float* samples,
+    int sampleCount,
+    const TranscriptionRuntimeOptions& runtimeOptions) {
   if (!context_) {
     return TranscriptionResult{false, QStringLiteral("转录模型未加载"), {}};
   }
@@ -89,9 +124,14 @@ TranscriptionResult WhisperTranscriber::transcribe(
   params.print_timestamps = false;
   params.print_special = false;
   params.translate = false;
-  params.no_context = false;
-  params.single_segment = false;
+  params.no_context = runtimeOptions.noContext;
+  params.no_timestamps = !options_.timestampsEnabled || runtimeOptions.noTimestamps;
+  params.single_segment = runtimeOptions.singleSegment;
   params.n_threads = options_.threadCount;
+  params.audio_ctx = runtimeOptions.audioContext;
+  if (runtimeOptions.maxTokens >= 0) {
+    params.max_tokens = runtimeOptions.maxTokens;
+  }
 
   const QByteArray languageBytes = options_.languageCode.trimmed().toUtf8();
   if (!languageBytes.isEmpty()) {

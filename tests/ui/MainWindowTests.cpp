@@ -114,6 +114,7 @@ private slots:
   void importsWhisperModelAtRuntime();
   void liveInterpretationModeShowsAccuracyWarning();
   void liveInterpretationStartsPlaybackBeforeSubtitlesFinish();
+  void showsLatestLiveSubtitleWhenRecognitionLagsPlayback();
   void showsTaskModeAndCancelControls();
   void placesPlaybackControlsBelowVideo();
   void overlaysSubtitleOnVideo();
@@ -373,7 +374,8 @@ void MainWindowTests::switchesTranslationSettingsByTaskType() {
   QVERIFY(startTaskButton);
   QVERIFY(translationSettingsPanel);
 
-  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("transcribe"));
+  QVERIFY(taskTypeComboBox->findData(QStringLiteral("direct_play")) >= 0);
+  QCOMPARE(taskTypeComboBox->currentData().toString(), QStringLiteral("direct_play"));
   QVERIFY(translationSettingsPanel->isHidden());
 
   taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("translate")));
@@ -392,8 +394,9 @@ void MainWindowTests::liveInterpretationModeShowsAccuracyWarning() {
 
   taskTypeComboBox->setCurrentIndex(taskTypeComboBox->findData(QStringLiteral("live_interpretation")));
 
-  QVERIFY(!translationSettingsPanel->isHidden());
+  QVERIFY(translationSettingsPanel->isHidden());
   QVERIFY(!liveDescription->isHidden());
+  QVERIFY(liveDescription->text().contains(QStringLiteral("实时转录")));
   QVERIFY(liveDescription->text().contains(QStringLiteral("不如预处理字幕")));
 }
 
@@ -438,6 +441,23 @@ void MainWindowTests::liveInterpretationStartsPlaybackBeforeSubtitlesFinish() {
   QVERIFY(cancelButton->isEnabled());
 }
 
+void MainWindowTests::showsLatestLiveSubtitleWhenRecognitionLagsPlayback() {
+  MainWindow window;
+
+  auto* subtitleLabel = window.findChild<QLabel*>(QStringLiteral("subtitleLabel"));
+  QVERIFY(subtitleLabel);
+
+  window.displayLiveSubtitleSegmentForTest(
+      SubtitleSegment{
+          0,
+          1000,
+          QStringLiteral("recognized subtitle"),
+          QString()},
+      2500);
+
+  QCOMPARE(subtitleLabel->text(), QStringLiteral("recognized subtitle"));
+}
+
 void MainWindowTests::importsWhisperModelAtRuntime() {
   QTemporaryDir dir;
   QVERIFY(dir.isValid());
@@ -463,17 +483,18 @@ void MainWindowTests::importsWhisperModelAtRuntime() {
 void MainWindowTests::showsTaskModeAndCancelControls() {
   MainWindow window;
 
-  auto* directPlayButton = window.findChild<QPushButton*>(QStringLiteral("directPlayButton"));
   auto* startTaskButton = window.findChild<QPushButton*>(QStringLiteral("startTaskButton"));
   auto* cancelButton = window.findChild<QPushButton*>(QStringLiteral("cancelTaskButton"));
+  auto* taskOptionsPanel = window.findChild<QWidget*>(QStringLiteral("taskOptionsPanel"));
 
-  QVERIFY(directPlayButton);
   QVERIFY(startTaskButton);
   QVERIFY(cancelButton);
+  QVERIFY(taskOptionsPanel);
+  QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("directPlayButton")));
   QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("transcribeButton")));
   QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("translateSubtitleButton")));
   QVERIFY(!window.findChild<QPushButton*>(QStringLiteral("cancelSubtitlePreparationButton")));
-  QVERIFY(!directPlayButton->isEnabled());
+  QCOMPARE(cancelButton->parentWidget(), taskOptionsPanel);
   QVERIFY(!startTaskButton->isEnabled());
   QVERIFY(!cancelButton->isEnabled());
 }

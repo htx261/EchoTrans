@@ -10,6 +10,7 @@ private slots:
   void fallsBackToSourceTextWhenTranslationIsEmpty();
   void returnsEmptyTextWhenNoSegmentMatches();
   void appendsLiveSegmentsInTimeOrder();
+  void replacesOverlappingLiveSegments();
 };
 
 void SubtitleTrackTests::returnsTranslatedTextForActiveSegment() {
@@ -51,6 +52,26 @@ void SubtitleTrackTests::appendsLiveSegmentsInTimeOrder() {
   QCOMPARE(track.textAt(1500), QStringLiteral("Second"));
   QCOMPARE(track.segments().size(), 2);
   QCOMPARE(track.segments()[0].sourceText, QStringLiteral("First"));
+}
+
+void SubtitleTrackTests::replacesOverlappingLiveSegments() {
+  SubtitleTrack track;
+  track.setSegments({
+      SubtitleSegment{0, 800, QStringLiteral("uncertain"), QStringLiteral("不准确")},
+      SubtitleSegment{1200, 1800, QStringLiteral("later"), QStringLiteral("稍后")}
+  });
+
+  track.upsertSegment(SubtitleSegment{
+      0,
+      1200,
+      QStringLiteral("confirmed"),
+      QStringLiteral("已确认")});
+
+  QCOMPARE(track.segments().size(), 2);
+  QCOMPARE(track.segments()[0].startMs, 0);
+  QCOMPARE(track.segments()[0].endMs, 1200);
+  QCOMPARE(track.segments()[0].translatedText, QStringLiteral("已确认"));
+  QCOMPARE(track.segments()[1].sourceText, QStringLiteral("later"));
 }
 
 QTEST_MAIN(SubtitleTrackTests)

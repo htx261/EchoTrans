@@ -15,6 +15,12 @@ TranscriptionAudioPreprocessor::TranscriptionAudioPreprocessor(
   if (options_.segmentWindowMs <= 0) {
     options_.segmentWindowMs = 2000;
   }
+  if (options_.segmentOverlapMs < 0) {
+    options_.segmentOverlapMs = 0;
+  }
+  if (options_.segmentOverlapMs >= options_.segmentWindowMs) {
+    options_.segmentOverlapMs = options_.segmentWindowMs - 1;
+  }
 }
 
 void TranscriptionAudioPreprocessor::appendFrame(
@@ -46,6 +52,14 @@ void TranscriptionAudioPreprocessor::appendFrame(
 }
 
 void TranscriptionAudioPreprocessor::appendEndOfStream() {
+  const int overlapSamples = static_cast<int>(
+      static_cast<qint64>(options_.targetSampleRate)
+      * options_.segmentOverlapMs
+      / 1000) * options_.targetChannelCount;
+  if (overlapSamples > 0 && pendingSamples_.size() <= overlapSamples) {
+    pendingSamples_.clear();
+  }
+
   if (!pendingSamples_.isEmpty()) {
     TranscriptionAudioChunk chunk;
     chunk.startPtsMs = pendingStartPtsMs_;
@@ -132,6 +146,11 @@ QVector<float> TranscriptionAudioPreprocessor::normalizeToTarget(
 
 void TranscriptionAudioPreprocessor::emitReadySegments() {
   const int segmentSamples = segmentSampleCount() * options_.targetChannelCount;
+  const int overlapSamples = static_cast<int>(
+      static_cast<qint64>(options_.targetSampleRate)
+      * options_.segmentOverlapMs
+      / 1000) * options_.targetChannelCount;
+  const int stepSamples = std::max(1, segmentSamples - overlapSamples);
   while (pendingSamples_.size() >= segmentSamples) {
     TranscriptionAudioChunk chunk;
     chunk.startPtsMs = pendingStartPtsMs_;
@@ -140,8 +159,8 @@ void TranscriptionAudioPreprocessor::emitReadySegments() {
     chunk.samples = pendingSamples_.mid(0, segmentSamples);
     readyChunks_.push_back(std::move(chunk));
 
-    pendingSamples_.erase(pendingSamples_.begin(), pendingSamples_.begin() + segmentSamples);
-    pendingStartPtsMs_ += samplesToMs(segmentSamples / options_.targetChannelCount);
+    pendingSamples_.erase(pendingSamples_.begin(), pendingSamples_.begin() + stepSamples);
+    pendingStartPtsMs_ += samplesToMs(stepSamples / options_.targetChannelCount);
   }
 }
 

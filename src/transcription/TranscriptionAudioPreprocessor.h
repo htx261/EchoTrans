@@ -7,6 +7,7 @@ struct TranscriptionAudioPreprocessorOptions {
   int targetSampleRate = 16000;
   int targetChannelCount = 1;
   int segmentWindowMs = 10000;
+  int segmentOverlapMs = 0;
 };
 
 struct TranscriptionAudioChunk {

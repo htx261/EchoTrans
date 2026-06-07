@@ -14,6 +14,7 @@ class SubtitleTrack {
 public:
   void setSegments(QVector<SubtitleSegment> segments);
   void appendSegment(const SubtitleSegment& segment);
+  void upsertSegment(const SubtitleSegment& segment);
   QVector<SubtitleSegment> segments() const;
   QString textAt(qint64 positionMs) const;
   bool isEmpty() const;

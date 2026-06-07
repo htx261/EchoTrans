@@ -1,10 +1,10 @@
 #pragma once
 
 #include "player/BlockingQueue.h"
+#include "player/TranscriptionAudioFrame.h"
 
 #include <QByteArray>
 #include <QImage>
-#include <QVector>
 #include <QtGlobal>
 
 #include <memory>
@@ -32,14 +32,6 @@ struct PlaybackFrame {
   int channelCount = 0;
   int bytesPerSample = 0;
   QImage image;
-  bool endOfStream = false;
-};
-
-struct TranscriptionAudioFrame {
-  qint64 ptsMs = 0;
-  int sampleRate = 0;
-  int channelCount = 0;
-  QVector<float> samples;
   bool endOfStream = false;
 };
 
